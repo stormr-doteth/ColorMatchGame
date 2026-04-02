@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git clone:*)",
+      "WebSearch",
+      "Bash(xargs wc:*)"
+    ]
+  }
+}

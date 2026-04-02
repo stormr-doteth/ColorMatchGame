@@ -1,0 +1,13 @@
+[package]
+name = "storm/firstcodexroblox"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+React = "jsdotlua/react@17.2.1"
+ReactRoblox = "jsdotlua/react-roblox@17.2.1"
+TopBarPlus = "1foreverhd/topbarplus@3.4.0"
+
+[server-dependencies]
+ProfileStore = "lm-loleris/profilestore@1.0.3"
