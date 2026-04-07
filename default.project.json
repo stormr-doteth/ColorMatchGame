@@ -5,11 +5,11 @@
     "Lighting": {
       "$properties": {
         "Ambient": [
-          0.0,
-          0.0,
-          0.0
+          0.9019607901573181,
+          0.7843137383460999,
+          0.8941176533699036
         ],
-        "Brightness": 2.0,
+        "Brightness": 1.3899999856948853,
         "ColorShift_Bottom": [
           1.0,
           0.7450980544090271,
@@ -27,7 +27,7 @@
           0.7529412508010864,
           0.7529412508010864
         ],
-        "GeographicLatitude": 0.0,
+        "GeographicLatitude": 24.0,
         "GlobalShadows": true,
         "OutdoorAmbient": [
           0.27450981736183167,
@@ -38,7 +38,7 @@
         "PrioritizeLightingQuality": true,
         "ShadowSoftness": 0.20000000298023224,
         "Technology": "ShadowMap",
-        "TimeOfDay": "14:30:00"
+        "TimeOfDay": "11:00:00"
       }
     },
     "ReplicatedStorage": {
