@@ -3,7 +3,33 @@
     "allow": [
       "Bash(git clone:*)",
       "WebSearch",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(git push:*)",
+      "Bash(rojo build:*)",
+      "Bash(rojo syncback:*)",
+      "Bash(where rbx-studio-mcp:*)",
+      "Bash(where rbx-studio-mcp.exe)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Storm/Documents/_2026_claudecode_projects/_ColorMatchGame/$LOCALAPPDATA/Programs/**)",
+      "WebFetch(domain:create.roblox.com)",
+      "Bash(claude mcp:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(~/.claude.json.tmp)",
+      "Bash(mv ~/.claude.json.tmp ~/.claude.json)",
+      "Bash(node:*)",
+      "mcp__Roblox_Studio__search_game_tree",
+      "mcp__Roblox_Studio__get_console_output",
+      "mcp__Roblox_Studio__list_roblox_studios",
+      "mcp__Roblox_Studio__set_active_studio",
+      "mcp__Roblox_Studio__script_read",
+      "mcp__Roblox_Studio__start_stop_play",
+      "Bash(ls *.json *.toml)",
+      "Bash(command -v stylua)",
+      "Bash(command -v selene)",
+      "Bash(command -v luau)",
+      "Bash(command -v rojo)",
+      "WebFetch(domain:dialed.gg)",
+      "Bash(git add:*)"
     ]
   }
 }

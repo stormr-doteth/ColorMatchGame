@@ -92,7 +92,7 @@ local function VerticalStrip(props: {
 		}),
 
 		Thumb = e("Frame", {
-			Size = UDim2.new(1, 10, 0, 10),
+			Size = UDim2.new(1, 10, 0, 18),
 			Position = UDim2.new(0.5, 0, props.value, 0),
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
@@ -148,7 +148,7 @@ local function ColorPicker(props: ColorPickerProps)
 	})
 
 	return e("Frame", {
-		Size = UDim2.new(0, 172, 1, 0),
+		Size = UDim2.new(0, 200, 1, 0),
 		BackgroundTransparency = 1,
 	}, {
 		Layout = e("UIListLayout", {
@@ -160,7 +160,7 @@ local function ColorPicker(props: ColorPickerProps)
 		HueStrip = e(VerticalStrip, {
 			gradient = HUE_GRADIENT,
 			value = hue,
-			width = 48,
+			width = 60,
 			onChange = props.onChangeH,
 			LayoutOrder = 1,
 		}),
@@ -168,7 +168,7 @@ local function ColorPicker(props: ColorPickerProps)
 		SatStrip = e(VerticalStrip, {
 			gradient = satGradient,
 			value = 1 - sat,
-			width = 48,
+			width = 60,
 			onChange = function(v)
 				props.onChangeS(1 - v)
 			end,
@@ -178,7 +178,7 @@ local function ColorPicker(props: ColorPickerProps)
 		ValStrip = e(VerticalStrip, {
 			gradient = valGradient,
 			value = 1 - val,
-			width = 48,
+			width = 60,
 			onChange = function(v)
 				props.onChangeV(1 - v)
 			end,

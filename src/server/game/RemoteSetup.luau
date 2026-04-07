@@ -9,6 +9,7 @@ local REMOTE_NAMES = {
 	"MatchEnd",
 	"LeaveTable",
 	"PlayerSeated",
+	"NextRound",
 }
 
 local RemoteSetup = {}

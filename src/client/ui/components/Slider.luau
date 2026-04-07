@@ -80,7 +80,7 @@ local function Slider(props: SliderProps)
 			Text = `{props.label}: {displayValue}`,
 			TextColor3 = Color3.fromRGB(255, 255, 255),
 			TextSize = 16,
-			Font = Enum.Font.GothamBold,
+			Font = Enum.Font.FredokaOne,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 

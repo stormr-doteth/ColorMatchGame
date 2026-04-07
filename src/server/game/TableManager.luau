@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local MatchController = require(script.Parent.MatchController)
+local SoloMatchController = require(script.Parent.SoloMatchController)
 
 local TableManager = {}
 
@@ -22,42 +23,44 @@ end
 local function createBillboard(tablePart: BasePart)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "TableBillboard"
-	billboard.Size = UDim2.fromOffset(300, 120)
-	billboard.StudsOffset = Vector3.new(0, 6, 0)
+	billboard.Size = UDim2.new(6, 0, 2.5, 0) -- studs-based, scales with distance
+	billboard.StudsOffset = Vector3.new(0, 5, 0)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 0, 0)
 	billboard.AlwaysOnTop = false
 	billboard.LightInfluence = 0
+	billboard.MaxDistance = 50
 	billboard.Adornee = tablePart
 	billboard.Parent = tablePart
 
 	local playerCount = Instance.new("TextLabel")
 	playerCount.Name = "PlayerCount"
-	playerCount.Size = UDim2.new(1, 0, 0.6, 0)
+	playerCount.Size = UDim2.new(1, 0, 0.55, 0)
 	playerCount.Position = UDim2.fromScale(0, 0)
 	playerCount.BackgroundTransparency = 1
 	playerCount.Text = "0/2 Players"
 	playerCount.TextColor3 = Color3.fromRGB(255, 255, 255)
 	playerCount.TextScaled = true
-	playerCount.Font = Enum.Font.GothamBold
+	playerCount.Font = Enum.Font.FredokaOne
 	playerCount.Parent = billboard
 
 	local playerCountStroke = Instance.new("UIStroke")
-	playerCountStroke.Thickness = 3
+	playerCountStroke.Thickness = 2
 	playerCountStroke.Color = Color3.fromRGB(0, 0, 0)
 	playerCountStroke.Parent = playerCount
 
 	local reward = Instance.new("TextLabel")
 	reward.Name = "Reward"
 	reward.Size = UDim2.new(1, 0, 0.4, 0)
-	reward.Position = UDim2.fromScale(0, 0.6)
+	reward.Position = UDim2.fromScale(0, 0.55)
 	reward.BackgroundTransparency = 1
 	reward.Text = `Win ${Constants.WIN_REWARD}`
 	reward.TextColor3 = Color3.fromRGB(50, 255, 50)
 	reward.TextScaled = true
-	reward.Font = Enum.Font.GothamBold
+	reward.Font = Enum.Font.FredokaOne
 	reward.Parent = billboard
 
 	local rewardStroke = Instance.new("UIStroke")
-	rewardStroke.Thickness = 2
+	rewardStroke.Thickness = 1.5
 	rewardStroke.Color = Color3.fromRGB(0, 0, 0)
 	rewardStroke.Parent = reward
 
@@ -76,7 +79,12 @@ end
 
 local function updateBillboard(tableState)
 	local count = getPlayerCount(tableState)
-	tableState.playerCountLabel.Text = `{count}/2 Players`
+	local max = tableState.maxPlayers or 2
+	if max == 1 then
+		tableState.playerCountLabel.Text = if count > 0 then "In Use" else "Solo Practice"
+	else
+		tableState.playerCountLabel.Text = `{count}/{max} Players`
+	end
 end
 
 local function findSeat(chairModel): Seat?
@@ -149,8 +157,10 @@ local function seatPlayer(tableId: string, player: Player)
 	local count = getPlayerCount(tableState)
 	updateBillboard(tableState)
 
+	local maxPlayers = tableState.maxPlayers or 2
+
 	-- Disable prompt if table is full
-	if count >= 2 then
+	if count >= maxPlayers then
 		tableState.prompt.Enabled = false
 	end
 
@@ -158,11 +168,22 @@ local function seatPlayer(tableId: string, player: Player)
 	PlayerSeatedRemote:FireClient(player, {
 		tableId = tableId,
 		playerCount = count,
-		maxPlayers = 2,
+		maxPlayers = maxPlayers,
+		solo = maxPlayers == 1,
 	})
 
-	-- Check if both chairs occupied → start match
-	if count == 2 then
+	-- Start match when table is full
+	if maxPlayers == 1 and count == 1 then
+		-- Solo mode — start immediately
+		local match = SoloMatchController.new(player, function()
+			resetTable(tableId)
+		end)
+
+		tableState.match = match
+		task.spawn(function()
+			match:Start()
+		end)
+	elseif maxPlayers == 2 and count == 2 then
 		local p1 = tableState.chairs[1].player
 		local p2 = tableState.chairs[2].player
 
@@ -195,7 +216,7 @@ local function unseatPlayer(tableId: string, player: Player)
 
 	-- Re-enable prompt if table has space
 	local count = getPlayerCount(tableState)
-	if count < 2 then
+	if count < (tableState.maxPlayers or 2) then
 		tableState.prompt.Enabled = true
 	end
 
@@ -243,17 +264,30 @@ function TableManager.Init()
 		local chair1 = tableModel:FindFirstChild("Chair1")
 		local chair2 = tableModel:FindFirstChild("Chair2")
 
-		if not tablePart or not chair1 or not chair2 then
-			warn(`[TableManager] {tableModel.Name} missing Table, Chair1, or Chair2`)
+		if not tablePart or not chair1 then
+			warn(`[TableManager] {tableModel.Name} missing Table or Chair1`)
 			continue
 		end
+
+		-- Determine if solo (no Chair2) or 1v1
+		local isSolo = chair2 == nil
+		local maxPlayers = if isSolo then 1 else 2
 
 		local tableId = tableModel.Name
 		local billboard, playerCountLabel = createBillboard(tablePart)
 
+		-- Update reward text for solo tables
+		if isSolo then
+			local rewardLabel = billboard:FindFirstChild("Reward", true)
+			if rewardLabel then
+				rewardLabel.Text = "Practice Mode"
+				rewardLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+			end
+		end
+
 		-- Single ProximityPrompt on the Table part
 		local prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText = "Join"
+		prompt.ActionText = if isSolo then "Practice" else "Join"
 		prompt.ObjectText = ""
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.MaxActivationDistance = 10
@@ -261,17 +295,22 @@ function TableManager.Init()
 		prompt.RequiresLineOfSight = false
 		prompt.Parent = tablePart
 
+		local chairs = { [1] = { part = chair1, player = nil } }
+		if not isSolo then
+			chairs[2] = { part = chair2, player = nil }
+		end
+
 		tables[tableId] = {
 			model = tableModel,
 			prompt = prompt,
-			chairs = {
-				[1] = { part = chair1, player = nil },
-				[2] = { part = chair2, player = nil },
-			},
+			chairs = chairs,
+			maxPlayers = maxPlayers,
 			billboard = billboard,
 			playerCountLabel = playerCountLabel,
 			match = nil,
 		}
+
+		updateBillboard(tables[tableId])
 
 		prompt.Triggered:Connect(function(player)
 			seatPlayer(tableId, player)

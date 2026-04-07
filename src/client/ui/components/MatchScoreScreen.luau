@@ -7,6 +7,12 @@ local ColorDisplay = require(script.Parent.ColorDisplay)
 
 local e = React.createElement
 
+local function StrokedText(props)
+	return e("TextLabel", props, {
+		Stroke = e("UIStroke", { Color = Color3.fromRGB(0, 0, 0), Thickness = 2, Transparency = 0.3 }),
+	})
+end
+
 export type MatchScoreScreenProps = {
 	targetColor: Color3,
 	myColor: Color3,
@@ -43,7 +49,7 @@ local function MatchScoreScreen(props: MatchScoreScreenProps)
 			Padding = UDim.new(0, 16),
 		}),
 
-		RoundLabel = e("TextLabel", {
+		RoundLabel = StrokedText({
 			Size = UDim2.fromOffset(600, 40),
 			BackgroundTransparency = 1,
 			Text = roundText,
@@ -52,7 +58,7 @@ local function MatchScoreScreen(props: MatchScoreScreenProps)
 				elseif myWon then Color3.fromRGB(100, 255, 100)
 				else Color3.fromRGB(255, 100, 100),
 			TextSize = 32,
-			Font = Enum.Font.GothamBold,
+			Font = Enum.Font.FredokaOne,
 			LayoutOrder = 1,
 		}),
 
@@ -70,23 +76,23 @@ local function MatchScoreScreen(props: MatchScoreScreenProps)
 				Padding = UDim.new(0, 40),
 			}),
 
-			MyScore = e("TextLabel", {
+			MyScore = StrokedText({
 				Size = UDim2.fromOffset(200, 50),
 				BackgroundTransparency = 1,
 				Text = `You: {props.myScore}%`,
 				TextColor3 = Color3.fromRGB(255, 255, 255),
 				TextSize = 28,
-				Font = Enum.Font.GothamBold,
+				Font = Enum.Font.FredokaOne,
 				LayoutOrder = 1,
 			}),
 
-			OppScore = e("TextLabel", {
+			OppScore = StrokedText({
 				Size = UDim2.fromOffset(200, 50),
 				BackgroundTransparency = 1,
 				Text = `{props.opponentName}: {props.opponentScore}%`,
 				TextColor3 = Color3.fromRGB(200, 200, 200),
 				TextSize = 28,
-				Font = Enum.Font.GothamBold,
+				Font = Enum.Font.FredokaOne,
 				LayoutOrder = 2,
 			}),
 		}),
@@ -121,13 +127,13 @@ local function MatchScoreScreen(props: MatchScoreScreenProps)
 		}),
 
 		-- Win tally
-		Tally = e("TextLabel", {
+		Tally = StrokedText({
 			Size = UDim2.fromOffset(500, 36),
 			BackgroundTransparency = 1,
 			Text = `Wins — You: {props.myWins}/{props.roundsToWin}  |  {props.opponentName}: {props.opponentWins}/{props.roundsToWin}`,
 			TextColor3 = Color3.fromRGB(200, 200, 200),
 			TextSize = 22,
-			Font = Enum.Font.GothamMedium,
+			Font = Enum.Font.FredokaOne,
 			LayoutOrder = 4,
 		}),
 	})

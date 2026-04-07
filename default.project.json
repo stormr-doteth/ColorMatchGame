@@ -2,80 +2,136 @@
   "name": "FirstCodexRoblox",
   "tree": {
     "$className": "DataModel",
-
+    "Lighting": {
+      "$properties": {
+        "Ambient": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "Brightness": 2.0,
+        "ColorShift_Bottom": [
+          1.0,
+          0.7450980544090271,
+          0.9254902005195618
+        ],
+        "ColorShift_Top": [
+          0.7372549176216125,
+          0.9215686321258545,
+          1.0
+        ],
+        "EnvironmentDiffuseScale": 0.30000001192092896,
+        "EnvironmentSpecularScale": 0.20000000298023224,
+        "FogColor": [
+          0.7529412508010864,
+          0.7529412508010864,
+          0.7529412508010864
+        ],
+        "GeographicLatitude": 0.0,
+        "GlobalShadows": true,
+        "OutdoorAmbient": [
+          0.27450981736183167,
+          0.27450981736183167,
+          0.27450981736183167
+        ],
+        "Outlines": false,
+        "PrioritizeLightingQuality": true,
+        "ShadowSoftness": 0.20000000298023224,
+        "Technology": "ShadowMap",
+        "TimeOfDay": "14:30:00"
+      }
+    },
     "ReplicatedStorage": {
-      "Shared": {
-        "$path": "src/shared"
-      },
       "Packages": {
         "$path": "Packages"
+      },
+      "Shared": {
+        "$path": "src/shared"
       }
     },
-
     "ServerScriptService": {
-      "Server": {
-        "$path": "src/server"
-      },
       "Packages": {
         "$path": "ServerPackages"
+      },
+      "Server": {
+        "$path": "src/server"
       }
     },
-
+    "SoundService": {
+      "$properties": {
+        "DefaultListenerLocation": "Camera",
+        "RespectFilteringEnabled": true
+      }
+    },
     "StarterPlayer": {
       "StarterPlayerScripts": {
         "Client": {
           "$path": "src/client"
         }
+      },
+      "$properties": {
+        "AvatarJointUpgrade_SerializedRollout": "Enabled",
+        "CameraMaxZoomDistance": 128.0,
+        "CharacterBreakJointsOnDeath": false,
+        "CharacterUseJumpPower": false
       }
     },
-
     "Workspace": {
       "$properties": {
-        "FilteringEnabled": true
-      },
-      "Tables": {
-        "$className": "Folder"
-      },
-      "Baseplate": {
-        "$className": "Part",
-        "$properties": {
-          "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
-          "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
+        "EnableSLIMAvatars": {
+          "Enum": 0
+        },
+        "FilteringEnabled": true,
+        "LayeredClothingCacheOptimizations": {
+          "Enum": 0
+        },
+        "NextGenerationReplication": {
+          "Enum": 0
+        },
+        "PlayerScriptsUseInputActionSystem": {
+          "Enum": 0
+        },
+        "SignalBehavior": "Deferred",
+        "StreamOutBehavior": "Opportunistic",
+        "StreamingEnabled": true,
+        "StreamingIntegrityMode": "PauseOutsideLoadedArea",
+        "UseFixedSimulation": {
+          "Enum": 0
+        },
+        "ValidateEnabledProximityPrompt": {
+          "Enum": 0
+        },
+        "WorldPivotData": {
+          "OptionalCFrame": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "orientation": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
         }
-      }
-    },
-    "Lighting": {
-      "$properties": {
-        "Ambient": [
-          0,
-          0,
-          0
-        ],
-        "Brightness": 2,
-        "GlobalShadows": true,
-        "Outlines": false,
-        "Technology": "Voxel"
-      }
-    },
-    "SoundService": {
-      "$properties": {
-        "RespectFilteringEnabled": true
-      }
+      },
+      "$attributes": {
+        "Rojo_Target_CurrentCamera": "093a0a1d38c83b8409dde4df000003ae"
+      },
+      "$ignoreUnknownInstances": true
     }
   }
 }

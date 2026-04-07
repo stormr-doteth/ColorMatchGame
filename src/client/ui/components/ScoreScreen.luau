@@ -32,7 +32,7 @@ local function ScoreScreen(props: ScoreScreenProps)
 			Text = `{props.score}% Match!`,
 			TextColor3 = Color3.fromRGB(255, 255, 255),
 			TextSize = 48,
-			Font = Enum.Font.GothamBold,
+			Font = Enum.Font.FredokaOne,
 			LayoutOrder = 1,
 		}),
 
@@ -71,7 +71,7 @@ local function ScoreScreen(props: ScoreScreenProps)
 			Text = "Play Again",
 			TextColor3 = Color3.fromRGB(255, 255, 255),
 			TextSize = 24,
-			Font = Enum.Font.GothamBold,
+			Font = Enum.Font.FredokaOne,
 			LayoutOrder = 3,
 			[React.Event.Activated] = props.onPlayAgain,
 		}, {

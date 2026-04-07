@@ -28,6 +28,7 @@ function MatchController.new(player1: Player, player2: Player, onComplete: () ->
 	self.roundNumber = 0
 	self.player1Wins = 0
 	self.player2Wins = 0
+	self.roundHistory = {} :: { any }
 
 	self.targetH = 0
 	self.targetS = 0
@@ -83,7 +84,6 @@ function MatchController:StartRound()
 	-- Clean up any lingering state from previous round
 	self:DisconnectGuess()
 	self:CancelThreads()
-
 	self.roundNumber += 1
 	self.player1Guess = nil
 	self.player2Guess = nil
@@ -136,7 +136,9 @@ function MatchController:StartGuessing()
 	end)
 
 	-- Timeout: auto-submit score 0 for players who don't guess
-	self:ScheduleDelay(Constants.GUESS_TIMEOUT, function()
+	-- Server gives clients a small grace buffer beyond their visible timer
+	-- so a late-arriving auto-submit still counts.
+	self:ScheduleDelay(Constants.GUESS_TIMEOUT + 2, function()
 		if self.phase == "guessing" then
 			self:ProcessRoundResult()
 		end
@@ -210,11 +212,28 @@ function MatchController:ProcessRoundResult()
 		)
 	end
 
+	local roundWinner = 0
 	if score1 > score2 then
 		self.player1Wins += 1
+		roundWinner = 1
 	elseif score2 > score1 then
 		self.player2Wins += 1
+		roundWinner = 2
 	end
+
+	-- Include opponent's guess color and both player IDs for the reveal screen
+	local p1Guess = self.player1Guess or { h = 0, s = 0, v = 0 }
+	local p2Guess = self.player2Guess or { h = 0, s = 0, v = 0 }
+
+	-- Record this round in history (used for end-of-match recap)
+	table.insert(self.roundHistory, {
+		target = { h = self.targetH, s = self.targetS, v = self.targetV },
+		p1Guess = self.player1Guess,
+		p2Guess = self.player2Guess,
+		p1Score = score1,
+		p2Score = score2,
+		winner = roundWinner,
+	})
 
 	getRemote("RoundResult"):FireClient(self.player1, {
 		myScore = score1,
@@ -224,6 +243,11 @@ function MatchController:ProcessRoundResult()
 		targetH = self.targetH,
 		targetS = self.targetS,
 		targetV = self.targetV,
+		opponentGuessH = p2Guess.h,
+		opponentGuessS = p2Guess.s,
+		opponentGuessV = p2Guess.v,
+		myUserId = self.player1.UserId,
+		opponentUserId = self.player2.UserId,
 	})
 	getRemote("RoundResult"):FireClient(self.player2, {
 		myScore = score2,
@@ -233,6 +257,11 @@ function MatchController:ProcessRoundResult()
 		targetH = self.targetH,
 		targetS = self.targetS,
 		targetV = self.targetV,
+		opponentGuessH = p1Guess.h,
+		opponentGuessS = p1Guess.s,
+		opponentGuessV = p1Guess.v,
+		myUserId = self.player2.UserId,
+		opponentUserId = self.player1.UserId,
 	})
 
 	-- After result display, check for winner or start next round
@@ -245,6 +274,42 @@ function MatchController:ProcessRoundResult()
 			self:StartRound()
 		end
 	end)
+end
+
+-- Build a per-player view of the round history (perspective = playerIndex 1 or 2)
+function MatchController:BuildHistoryFor(playerIndex: number): { any }
+	local view = {}
+	for _, entry in self.roundHistory do
+		local myGuess, oppGuess, myScore, oppScore
+		if playerIndex == 1 then
+			myGuess = entry.p1Guess
+			oppGuess = entry.p2Guess
+			myScore = entry.p1Score
+			oppScore = entry.p2Score
+		else
+			myGuess = entry.p2Guess
+			oppGuess = entry.p1Guess
+			myScore = entry.p2Score
+			oppScore = entry.p1Score
+		end
+		local outcome
+		if entry.winner == 0 then
+			outcome = "tie"
+		elseif entry.winner == playerIndex then
+			outcome = "win"
+		else
+			outcome = "loss"
+		end
+		table.insert(view, {
+			target = entry.target,
+			myGuess = myGuess,
+			opponentGuess = oppGuess,
+			myScore = myScore,
+			opponentScore = oppScore,
+			outcome = outcome,
+		})
+	end
+	return view
 end
 
 function MatchController:EndMatch(winner: Player, loser: Player)
@@ -260,15 +325,18 @@ function MatchController:EndMatch(winner: Player, loser: Player)
 	local winnerData = ProfileService.GetData(winner)
 	local loserData = ProfileService.GetData(loser)
 
+	local winnerIsP1 = winner == self.player1
 	getRemote("MatchEnd"):FireClient(winner, {
 		won = true,
 		cashEarned = Constants.WIN_REWARD,
 		totalWins = winnerData and winnerData.Wins or 0,
+		roundHistory = self:BuildHistoryFor(if winnerIsP1 then 1 else 2),
 	})
 	getRemote("MatchEnd"):FireClient(loser, {
 		won = false,
 		cashEarned = 0,
 		totalWins = loserData and loserData.Wins or 0,
+		roundHistory = self:BuildHistoryFor(if winnerIsP1 then 2 else 1),
 	})
 
 	self:Cleanup()
@@ -297,10 +365,12 @@ function MatchController:PlayerDisconnected(player: Player)
 	local winnerData = ProfileService.GetData(winner)
 
 	if winner.Parent then
+		local winnerIsP1 = winner == self.player1
 		getRemote("MatchEnd"):FireClient(winner, {
 			won = true,
 			cashEarned = Constants.WIN_REWARD,
 			totalWins = winnerData and winnerData.Wins or 0,
+			roundHistory = self:BuildHistoryFor(if winnerIsP1 then 1 else 2),
 		})
 	end
 
@@ -310,7 +380,6 @@ end
 function MatchController:Cleanup()
 	self:DisconnectGuess()
 	self:CancelThreads()
-
 	if self.onComplete then
 		task.defer(self.onComplete)
 	end

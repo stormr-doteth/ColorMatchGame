@@ -44,7 +44,7 @@ local function ColorDisplay(props: ColorDisplayProps)
 			Text = props.label,
 			TextColor3 = Color3.fromRGB(200, 200, 200),
 			TextSize = 14,
-			Font = Enum.Font.GothamMedium,
+			Font = Enum.Font.FredokaOne,
 			LayoutOrder = 2,
 		}),
 	})
