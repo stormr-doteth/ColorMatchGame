@@ -5,6 +5,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local MatchController = require(script.Parent.MatchController)
 local SoloMatchController = require(script.Parent.SoloMatchController)
+local ChairShop = require(script.Parent.ChairShop)
+local ProfileService = require(script.Parent.Parent:WaitForChild("data"):WaitForChild("ProfileService"))
 
 local TableManager = {}
 
@@ -94,6 +96,86 @@ local function findSeat(chairModel): Seat?
 	return chairModel:FindFirstChildWhichIsA("Seat", true)
 end
 
+-- Apply the player's equipped chair skin to this chair slot. Hides every
+-- BasePart of the original chair, spawns a clone of the equipped chair model
+-- positioned so its Seat lines up with the original Seat, and returns the
+-- clone (or the original chair Model when no skin is equipped).
+local function applyChairSkin(chair, player)
+	local equipped = ProfileService.GetEquippedChair(player)
+	if equipped == "" then
+		return chair.part
+	end
+	local clone = ChairShop.CloneChair(equipped)
+	if not clone then
+		return chair.part
+	end
+
+	local cloneSeat = findSeat(clone)
+	local originalSeat = findSeat(chair.part)
+	if not cloneSeat or not originalSeat then
+		clone:Destroy()
+		return chair.part
+	end
+
+	-- Pivot clone so its Seat sits exactly where the original Seat was.
+	clone.PrimaryPart = cloneSeat
+	clone:PivotTo(originalSeat.CFrame)
+
+	-- Hide every BasePart of the original chair (transparency + collision off)
+	-- and disable the original Seat so the player can't auto-snap into it.
+	local hidden = {}
+	if chair.part:IsA("Model") then
+		for _, descendant in chair.part:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				hidden[descendant] = {
+					transparency = descendant.Transparency,
+					canCollide = descendant.CanCollide,
+				}
+				descendant.Transparency = 1
+				descendant.CanCollide = false
+				if descendant:IsA("Seat") then
+					hidden[descendant].seatDisabled = descendant.Disabled
+					descendant.Disabled = true
+				end
+			end
+		end
+	elseif chair.part:IsA("BasePart") then
+		hidden[chair.part] = {
+			transparency = chair.part.Transparency,
+			canCollide = chair.part.CanCollide,
+		}
+		chair.part.Transparency = 1
+		chair.part.CanCollide = false
+		if chair.part:IsA("Seat") then
+			hidden[chair.part].seatDisabled = chair.part.Disabled
+			chair.part.Disabled = true
+		end
+	end
+
+	clone.Parent = chair.part.Parent
+	chair.swap = { clone = clone, hidden = hidden }
+	return clone
+end
+
+local function removeChairSkin(chair)
+	if not chair.swap then
+		return
+	end
+	if chair.swap.clone then
+		chair.swap.clone:Destroy()
+	end
+	for part, restore in chair.swap.hidden do
+		if part.Parent then
+			part.Transparency = restore.transparency
+			part.CanCollide = restore.canCollide
+			if part:IsA("Seat") and restore.seatDisabled ~= nil then
+				part.Disabled = restore.seatDisabled
+			end
+		end
+	end
+	chair.swap = nil
+end
+
 local function seatPlayerInChair(player: Player, chairModel)
 	local seat = findSeat(chairModel)
 	if not seat then
@@ -151,8 +233,11 @@ local function seatPlayer(tableId: string, player: Player)
 	chair.player = player
 	playerToTable[player] = tableId
 
-	-- Anchor player at chair
-	seatPlayerInChair(player, chair.part)
+	-- Apply equipped chair skin (if any) and seat the player in whichever
+	-- chair model ends up in place — the skinned clone if there's one,
+	-- otherwise the original chair.
+	local activeChair = applyChairSkin(chair, player)
+	seatPlayerInChair(player, activeChair)
 
 	local count = getPlayerCount(tableState)
 	updateBillboard(tableState)
@@ -207,6 +292,7 @@ local function unseatPlayer(tableId: string, player: Player)
 	for _, chair in tableState.chairs do
 		if chair.player == player then
 			chair.player = nil
+			removeChairSkin(chair)
 			break
 		end
 	end
@@ -238,6 +324,7 @@ function resetTable(tableId: string)
 			playerToTable[player] = nil
 			kickFromSeat(player)
 		end
+		removeChairSkin(chair)
 	end
 
 	tableState.prompt.Enabled = true

@@ -10,6 +10,12 @@ local REMOTE_NAMES = {
 	"LeaveTable",
 	"PlayerSeated",
 	"NextRound",
+	"RestartSolo",
+	"BeginRound",
+	"PlayerDataUpdate",
+	"PurchaseChair",
+	"EquipChair",
+	"ShowNotification",
 }
 
 local RemoteSetup = {}

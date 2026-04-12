@@ -7,12 +7,33 @@ local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
 local TopBar = require(script:WaitForChild("TopBar"))
+local CashHud = require(script:WaitForChild("CashHud"))
+local WinsHud = require(script:WaitForChild("WinsHud"))
+local StreakHud = require(script:WaitForChild("StreakHud"))
+local InventoryHud = require(script:WaitForChild("InventoryHud"))
+local NotificationHud = require(script:WaitForChild("NotificationHud"))
 local App = require(script:WaitForChild("ui"):WaitForChild("App"))
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
 TopBar.Start()
+CashHud.Start()
+WinsHud.Start()
+StreakHud.Start()
+InventoryHud.Start()
+NotificationHud.Start()
+
+-- Listen for server-sent notifications (e.g. purchase confirmations).
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local notifyRemote = remotes:WaitForChild("ShowNotification", 5)
+if notifyRemote then
+	(notifyRemote :: RemoteEvent).OnClientEvent:Connect(function(message)
+		if typeof(message) == "string" then
+			NotificationHud.Show(message)
+		end
+	end)
+end
 
 -- Test window toggled by the settings icon
 local testGui = Instance.new("ScreenGui")

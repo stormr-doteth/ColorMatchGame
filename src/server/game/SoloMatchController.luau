@@ -65,7 +65,23 @@ function SoloMatchController:DisconnectGuess()
 end
 
 function SoloMatchController:Start()
-	-- Tell client a solo match is starting
+	-- Defensive cleanup of any leftover listeners from a previous run
+	self:DisconnectGuess()
+	if self.nextConnection then
+		self.nextConnection:Disconnect()
+		self.nextConnection = nil
+	end
+	if self.endConnection then
+		self.endConnection:Disconnect()
+		self.endConnection = nil
+	end
+	if self.beginConnection then
+		self.beginConnection:Disconnect()
+		self.beginConnection = nil
+	end
+
+	-- Tell client a solo match is starting. The client shows an intro screen
+	-- and the player clicks "Play Now" (which fires NextRound) to begin round 1.
 	getRemote("MatchStart"):FireClient(self.player, {
 		opponentName = "",
 		roundsToWin = self.totalRounds,
@@ -73,8 +89,30 @@ function SoloMatchController:Start()
 		totalRounds = self.totalRounds,
 	})
 
-	task.wait(0.5)
-	self:StartRound()
+	self.phase = "waitingStart"
+	self.nextConnection = getRemote("NextRound").OnServerEvent:Connect(function(player)
+		if player == self.player and self.phase == "waitingStart" then
+			if self.nextConnection then
+				self.nextConnection:Disconnect()
+				self.nextConnection = nil
+			end
+			self:StartRound()
+		end
+	end)
+end
+
+function SoloMatchController:Restart()
+	if self.endConnection then
+		self.endConnection:Disconnect()
+		self.endConnection = nil
+	end
+	-- Reset round state but keep the player seated and the table reference alive.
+	self.roundNumber = 0
+	self.scores = {}
+	self.roundHistory = {}
+	self.guess = nil
+	self.phase = "idle"
+	self:Start()
 end
 
 function SoloMatchController:StartRound()
@@ -84,6 +122,10 @@ function SoloMatchController:StartRound()
 
 	self:DisconnectGuess()
 	self:CancelThreads()
+	if self.beginConnection then
+		self.beginConnection:Disconnect()
+		self.beginConnection = nil
+	end
 
 	self.roundNumber += 1
 	self.guess = nil
@@ -92,7 +134,10 @@ function SoloMatchController:StartRound()
 	self.targetS = math.random()
 	self.targetV = math.random()
 
-	self.phase = "showing"
+	-- Send the color immediately so the client can render it under the
+	-- "Ready / Set / GO!" countdown overlay. The show-duration timer doesn't
+	-- start until the client signals BeginRound (at the end of GO!).
+	self.phase = "showColorPending"
 
 	getRemote("RoundShowColor"):FireClient(self.player, {
 		h = self.targetH,
@@ -102,8 +147,17 @@ function SoloMatchController:StartRound()
 		roundNumber = self.roundNumber,
 	})
 
-	self:ScheduleDelay(Constants.SHOW_DURATION, function()
-		self:StartGuessing()
+	self.beginConnection = getRemote("BeginRound").OnServerEvent:Connect(function(player)
+		if player == self.player and self.phase == "showColorPending" then
+			if self.beginConnection then
+				self.beginConnection:Disconnect()
+				self.beginConnection = nil
+			end
+			self.phase = "showing"
+			self:ScheduleDelay(Constants.SHOW_DURATION, function()
+				self:StartGuessing()
+			end)
+		end
 	end)
 end
 
@@ -194,15 +248,8 @@ function SoloMatchController:ProcessRoundResult()
 		totalRounds = self.totalRounds,
 	})
 
-	-- Check if this was the last round
-	if self.roundNumber >= self.totalRounds then
-		self:ScheduleDelay(2, function()
-			self:EndMatch()
-		end)
-		return
-	end
-
-	-- Wait for player to click Next
+	-- Wait for the player to click Next. On the last round, Next ends the match
+	-- instead of starting a new round. No auto-advance — the player drives pacing.
 	self.phase = "waitingNext"
 	self.nextConnection = getRemote("NextRound").OnServerEvent:Connect(function(player)
 		if player == self.player and self.phase == "waitingNext" then
@@ -210,18 +257,11 @@ function SoloMatchController:ProcessRoundResult()
 				self.nextConnection:Disconnect()
 				self.nextConnection = nil
 			end
-			self:StartRound()
-		end
-	end)
-
-	-- Auto-advance fallback after 30 seconds
-	self:ScheduleDelay(30, function()
-		if self.phase == "waitingNext" then
-			if self.nextConnection then
-				self.nextConnection:Disconnect()
-				self.nextConnection = nil
+			if self.roundNumber >= self.totalRounds then
+				self:EndMatch()
+			else
+				self:StartRound()
 			end
-			self:StartRound()
 		end
 	end)
 end
@@ -230,8 +270,14 @@ function SoloMatchController:EndMatch()
 	if self.finished then
 		return
 	end
-	self.finished = true
-	self.phase = "finished"
+	self.phase = "ended"
+
+	self:DisconnectGuess()
+	self:CancelThreads()
+	if self.nextConnection then
+		self.nextConnection:Disconnect()
+		self.nextConnection = nil
+	end
 
 	-- Compute average accuracy
 	local total = 0
@@ -259,7 +305,14 @@ function SoloMatchController:EndMatch()
 		roundHistory = self.roundHistory,
 	})
 
-	self:Cleanup()
+	-- Wait for the player to choose Play Again or Done. We don't run Cleanup
+	-- here so the controller (and the player's seat) stay alive — Restart()
+	-- reuses everything. LeaveTable will route through PlayerDisconnected.
+	self.endConnection = getRemote("RestartSolo").OnServerEvent:Connect(function(player)
+		if player == self.player and self.phase == "ended" then
+			self:Restart()
+		end
+	end)
 end
 
 function SoloMatchController:PlayerDisconnected()
@@ -268,6 +321,10 @@ function SoloMatchController:PlayerDisconnected()
 	end
 	self.finished = true
 	self.phase = "finished"
+	if self.endConnection then
+		self.endConnection:Disconnect()
+		self.endConnection = nil
+	end
 	self:Cleanup()
 end
 
@@ -277,6 +334,14 @@ function SoloMatchController:Cleanup()
 	if self.nextConnection then
 		self.nextConnection:Disconnect()
 		self.nextConnection = nil
+	end
+	if self.endConnection then
+		self.endConnection:Disconnect()
+		self.endConnection = nil
+	end
+	if self.beginConnection then
+		self.beginConnection:Disconnect()
+		self.beginConnection = nil
 	end
 
 	if self.onComplete then

@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SocialService = game:GetService("SocialService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages.React)
@@ -54,6 +55,106 @@ end
 -- Extra headroom in REF_HEIGHT leaves room for the Roblox top bar / phone safe insets.
 local REF_WIDTH = 1280
 local REF_HEIGHT = 900
+
+-- Flair line shown above the round cards on the solo end screen, picked from
+-- the tier matching the player's total score (out of totalRounds * 100).
+local END_FLAIR = {
+	{ min = 0.90, lines = {
+		"Eagle eye! Are you a designer?",
+		"Suspiciously photographic.",
+		"You weren't supposed to do that well.",
+	}},
+	{ min = 0.75, lines = {
+		"Sharp memory.",
+		"Color theory degree?",
+		"Your eyes are working overtime.",
+	}},
+	{ min = 0.60, lines = {
+		"Solid run.",
+		"Better than most.",
+		"You held it together.",
+	}},
+	{ min = 0.40, lines = {
+		"Decent eye.",
+		"Middle of the pack.",
+		"Not bad, not great.",
+	}},
+	{ min = 0.20, lines = {
+		"Room to grow.",
+		"Your memory wandered off.",
+		"The colors got away from you.",
+	}},
+	{ min = 0.0, lines = {
+		"...practice makes perfect.",
+		"Have you considered glasses?",
+		"Your monitor is fine. It's you.",
+	}},
+}
+
+local function pickEndFlair(total: number, max: number): string
+	local pct = if max > 0 then total / max else 0
+	for _, tier in END_FLAIR do
+		if pct >= tier.min then
+			return tier.lines[math.random(1, #tier.lines)]
+		end
+	end
+	return ""
+end
+
+-- Diamond-split round card. Top-left triangle = target, bottom-right = guess,
+-- with the round score overlaid in the top-left corner. Reusable across the
+-- solo end screen and both player rows of the 1v1 end screen. When `wonRound`
+-- is true, the card gets a thick gold border so wins are obvious at a glance.
+local function DiamondCard(props: {
+	targetColor: Color3,
+	guessColor: Color3,
+	score: number,
+	size: number?,
+	wonRound: boolean?,
+	layoutOrder: number,
+})
+	local size = props.size or 110
+	local scoreSize = if size >= 100 then 26 else 22
+	local strokeColor = if props.wonRound
+		then Color3.fromRGB(255, 215, 0)
+		else Color3.fromRGB(255, 255, 255)
+	local strokeThickness = if props.wonRound then 3 else 1
+	local strokeTransparency = if props.wonRound then 0 else 0.7
+
+	return e("Frame", {
+		Size = UDim2.fromOffset(size, size),
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BorderSizePixel = 0,
+		LayoutOrder = props.layoutOrder,
+	}, {
+		Corner = e("UICorner", { CornerRadius = UDim.new(0, 12) }),
+		Stroke = e("UIStroke", {
+			Color = strokeColor,
+			Thickness = strokeThickness,
+			Transparency = strokeTransparency,
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 45,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, props.targetColor),
+				ColorSequenceKeypoint.new(0.499, props.targetColor),
+				ColorSequenceKeypoint.new(0.501, props.guessColor),
+				ColorSequenceKeypoint.new(1, props.guessColor),
+			}),
+		}),
+		Score = StrokedText({
+			Size = UDim2.fromOffset(80, 30),
+			Position = UDim2.fromOffset(10, 6),
+			BackgroundTransparency = 1,
+			Text = tostring(props.score or 0),
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			TextSize = scoreSize,
+			Font = Enum.Font.FredokaOne,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+		}),
+	})
+end
 
 -- Compact player info bar for persistent display during rounds (1v1 only)
 -- Compact 5-slot dot row for the persistent header bar
@@ -285,6 +386,8 @@ local function GameController()
 	local cashEarned, setCashEarned = React.useState(0)
 	local roundHistory, setRoundHistory = React.useState({})
 	local myRoundOutcomes, setMyRoundOutcomes = React.useState({})
+	-- Flair line on the solo end screen, picked once per match (in the MatchEnd handler)
+	local endFlairText, setEndFlairText = React.useState("")
 
 	-- Countdown state ("Ready", "Set", "GO!")
 	local countdownText, setCountdownText = React.useState("")
@@ -334,10 +437,12 @@ local function GameController()
 			setMyRoundOutcomes({})
 			setRoundHistory({})
 			if data.solo then
-				-- Solo skips waiting, goes straight to first round
-				setPhase("showing")
+				-- Solo: show the intro screen; player clicks "Play Now" to begin
+				setPhase("soloIntro")
 			else
-				setPhase("waiting")
+				-- 1v1: play the same Ready/Set/GO countdown solo uses, then
+				-- transition into the first round.
+				setPhase("countdown")
 			end
 		end))
 
@@ -350,7 +455,15 @@ local function GameController()
 			setGuessS(math.random())
 			setGuessV(math.random())
 			setSoloRoundNumber(data.roundNumber or 0)
-			setPhase("showing")
+			-- If we're mid-countdown (solo), the color was sent early so the
+			-- "GO!" overlay can render over it. Stay in countdown until the
+			-- countdown effect finishes and signals BeginRound.
+			setPhase(function(currentPhase)
+				if currentPhase == "countdown" then
+					return currentPhase
+				end
+				return "showing"
+			end)
 		end))
 
 		table.insert(connections, remotes:WaitForChild("RoundGuessPhase").OnClientEvent:Connect(function()
@@ -398,16 +511,25 @@ local function GameController()
 		table.insert(connections, remotes:WaitForChild("MatchEnd").OnClientEvent:Connect(function(data)
 			setMatchWon(data.won)
 			setCashEarned(data.cashEarned or 0)
+			-- Solo: dismissed by Done/Play Again buttons. 1v1: also no auto-dismiss.
 			if data.solo then
 				setSoloAverage(data.averageScore or 0)
 				setSoloBest(data.bestScore or 0)
+				-- Pick the end-screen flair line once, here, so it stays stable while
+				-- the matchEnd screen is open.
+				local history = data.roundHistory or {}
+				local total = 0
+				for _, entry in history do
+					total += (entry.myScore or 0)
+				end
+				local maxScore = #history * 100
+				if maxScore <= 0 then
+					maxScore = (data.totalRounds or 5) * 100
+				end
+				setEndFlairText(pickEndFlair(total, maxScore))
 			end
 			setRoundHistory(data.roundHistory or {})
 			setPhase("matchEnd")
-
-			task.delay(12, function()
-				setPhase("idle")
-			end)
 		end))
 
 		return function()
@@ -427,6 +549,8 @@ local function GameController()
 	local transitionProgress, setTransitionProgress = React.useState(0)
 	-- Text fade: 0 = fully visible, 1 = fully transparent
 	local textFade, setTextFade = React.useState(0)
+	-- Picker slide-away after solo submit: 0 = picker in place, 1 = fully off-screen left
+	local submittedAnim, setSubmittedAnim = React.useState(0)
 
 	-- Guess phase countdown (seconds remaining to submit)
 	local guessTimeLeft, setGuessTimeLeft = React.useState(Constants.GUESS_TIMEOUT)
@@ -468,6 +592,14 @@ local function GameController()
 
 	React.useEffect(function()
 		if phase ~= "showing" and phase ~= "guessing" then
+			-- During the solo post-submit slide-out we keep the picker visually
+			-- in place (transitionProgress=1, textFade=1) so submittedAnim alone
+			-- drives the leftward exit.
+			if isSolo and (phase == "submitted" or phase == "roundResult") then
+				setTransitionProgress(1)
+				setTextFade(1)
+				return
+			end
 			setTransitionProgress(0)
 			setTextFade(0)
 			return
@@ -530,6 +662,33 @@ local function GameController()
 		return nil
 	end, { phase })
 
+	-- Solo post-submit picker slide-away animation. When the player submits,
+	-- the color picker glides off-screen left before the reveal panels appear.
+	-- We don't return a cleanup so the animation always plays through, even
+	-- after the server fires roundResult and phase changes.
+	React.useEffect(function()
+		if not isSolo then
+			return
+		end
+		if phase == "showing" or phase == "guessing" then
+			setSubmittedAnim(0)
+			return
+		end
+		if phase == "submitted" then
+			task.spawn(function()
+				local start = tick()
+				while true do
+					local t = math.clamp((tick() - start) / 0.45, 0, 1)
+					local eased = 1 - (1 - t) * (1 - t)
+					setSubmittedAnim(eased)
+					if t >= 1 then break end
+					task.wait()
+				end
+			end)
+		end
+		return nil
+	end, { phase, isSolo })
+
 	-- Guess countdown — runs through both guessing and submitted phases so the
 	-- player can still see the deadline while waiting on their opponent.
 	-- Auto-submits if the player hasn't submitted yet when it hits 0.
@@ -580,11 +739,28 @@ local function GameController()
 	onSubmitRef.current = onSubmit
 
 	local function onNextRound()
-		-- Just start the countdown — server gets notified at the end
+		-- Last round in solo mode: skip the "Ready/Set/Go" ceremony — there's
+		-- no next color to show, the server will reply with MatchEnd. Fire
+		-- NextRound directly so the player goes straight to the results screen.
+		if isSolo and soloRoundNumber >= soloTotalRounds then
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			if remotes then
+				remotes.NextRound:FireServer()
+			end
+			return
+		end
+		-- Otherwise: play the countdown — server gets notified at the end
 		setPhase("countdown")
 	end
 
-	-- Countdown "Ready, Set, GO!" animation — fires NextRound at the end
+	-- Countdown "Ready, Set, GO!" animation. Used in two places:
+	--  • Solo: between rounds. We fire NextRound at the START so the server's
+	--    RoundShowColor arrives during Ready/Set; the GO! frame renders the
+	--    actual color. After GO! we fire BeginRound and switch to showing.
+	--  • 1v1: at the very start of the match (after MatchStart). The server
+	--    has already fired RoundShowColor for round 1 and is waiting for
+	--    BeginRound from BOTH players, so we don't fire NextRound here —
+	--    just play the animation, then fire BeginRound and switch to showing.
 	React.useEffect(function()
 		if phase ~= "countdown" then
 			return
@@ -592,8 +768,18 @@ local function GameController()
 		local running = true
 		setCountdownFade(0)
 		setCountdownText("")
+
+		-- Solo only: ask the server to start preparing the next round.
+		-- 1v1 already has RoundShowColor on the way (server fired it at match start).
+		if isSolo then
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			if remotes then
+				remotes.NextRound:FireServer()
+			end
+		end
+
 		task.spawn(function()
-			-- Fade to black
+			-- Fade in
 			local fadeStart = tick()
 			while running do
 				local t = math.clamp((tick() - fadeStart) / 0.4, 0, 1)
@@ -615,15 +801,20 @@ local function GameController()
 
 			-- "GO!"
 			setCountdownText("GO!")
-			task.wait(0.3)
+			task.wait(0.35)
 			if not running then return end
 
-			-- NOW tell the server to start the next round
-			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-			if remotes then
-				remotes.NextRound:FireServer()
+			-- Tell the server to start the show-duration timer and switch
+			-- locally into the showing phase. The color is already on screen.
+			local r = ReplicatedStorage:FindFirstChild("Remotes")
+			if r then
+				local begin = r:FindFirstChild("BeginRound")
+				if begin then
+					begin:FireServer()
+				end
 			end
-			-- Server will fire RoundShowColor which sets phase to "showing"
+			setCountdownText("")
+			setPhase("showing")
 		end)
 		return function()
 			running = false
@@ -686,11 +877,15 @@ local function GameController()
 		-- Nothing visible — player should walk to a table
 		return nil
 	elseif phase == "countdown" then
-		-- Fades to target color, then shows "Ready, Set, GO!"
+		-- "Ready / Set" overlay sits on the dark game frame. When "GO!" hits,
+		-- the target color (already received from the server) becomes the
+		-- background so it matches the showing-phase backdrop the player will
+		-- be memorizing.
+		local goLive = countdownText == "GO!"
 		content = e("Frame", {
 			Size = UDim2.fromScale(1, 1),
 			BackgroundColor3 = targetColor,
-			BackgroundTransparency = 1 - countdownFade,
+			BackgroundTransparency = if goLive then 0 else 1,
 			BorderSizePixel = 0,
 		}, {
 			Corner = e("UICorner", {
@@ -742,15 +937,167 @@ local function GameController()
 				Font = Enum.Font.FredokaOne,
 				LayoutOrder = 2,
 			}),
+
+			-- Invite Friends button — 1v1 only, opens the Roblox native invite
+			-- prompt so the player can pull people in to fill the table.
+			InviteFriends = (not isSolo) and e("TextButton", {
+				Size = UDim2.fromOffset(280, 64),
+				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+				BorderSizePixel = 0,
+				AutoButtonColor = true,
+				Text = "",
+				LayoutOrder = 3,
+				[React.Event.Activated] = function()
+					local localPlayer = Players.LocalPlayer
+					if not localPlayer then
+						return
+					end
+					-- PromptGameInvite can throw if invites aren't enabled in
+					-- this experience; swallow the error so the UI doesn't crash.
+					pcall(function()
+						SocialService:PromptGameInvite(localPlayer)
+					end)
+				end,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				Stroke = e("UIStroke", {
+					Color = Color3.fromRGB(0, 0, 0),
+					Thickness = 2,
+					Transparency = 0.4,
+				}),
+				Label = e("TextLabel", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundTransparency = 1,
+					Text = "INVITE FRIENDS",
+					TextColor3 = Color3.fromRGB(30, 30, 30),
+					TextSize = 26,
+					Font = Enum.Font.FredokaOne,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					TextYAlignment = Enum.TextYAlignment.Center,
+				}),
+			}) or nil,
+
+			-- Leave Table button — secondary style, sits below Invite Friends.
+			-- Fires LeaveTable on the server which routes through the table's
+			-- match-or-unseat handler, then dismisses the UI locally.
+			LeaveTable = (not isSolo) and e("TextButton", {
+				Size = UDim2.fromOffset(280, 56),
+				BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+				BackgroundTransparency = 0.15,
+				BorderSizePixel = 0,
+				AutoButtonColor = true,
+				Text = "",
+				LayoutOrder = 4,
+				[React.Event.Activated] = function()
+					local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+					if remotes then
+						local leave = remotes:FindFirstChild("LeaveTable")
+						if leave then
+							leave:FireServer()
+						end
+					end
+					setPhase("idle")
+				end,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				Stroke = e("UIStroke", {
+					Color = Color3.fromRGB(255, 255, 255),
+					Thickness = 2,
+					Transparency = 0.5,
+				}),
+				Label = e("TextLabel", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundTransparency = 1,
+					Text = "LEAVE TABLE",
+					TextColor3 = Color3.fromRGB(220, 220, 220),
+					TextSize = 22,
+					Font = Enum.Font.FredokaOne,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					TextYAlignment = Enum.TextYAlignment.Center,
+				}),
+			}) or nil,
+		})
+	elseif phase == "soloIntro" then
+		content = e("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 60),
+				PaddingBottom = UDim.new(0, 60),
+				PaddingLeft = UDim.new(0, 64),
+				PaddingRight = UDim.new(0, 64),
+			}),
+
+			Title = StrokedText({
+				Size = UDim2.new(1, 0, 0, 88),
+				Position = UDim2.fromOffset(0, 0),
+				BackgroundTransparency = 1,
+				Text = "Remember the Color.",
+				TextColor3 = Color3.fromRGB(255, 255, 255),
+				TextSize = 64,
+				Font = Enum.Font.FredokaOne,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+			}),
+
+			Subtitle = e("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 200),
+				Position = UDim2.fromOffset(0, 110),
+				BackgroundTransparency = 1,
+				Text = "It's nearly impossible to recall an exact color. This is a simple test to see how good you are at it.\n\nWe'll show you 5 colors, one at a time. Then you'll try to recreate them.",
+				TextColor3 = Color3.fromRGB(200, 200, 200),
+				TextSize = 24,
+				Font = Enum.Font.FredokaOne,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+			}),
+
+			PlayButton = e("TextButton", {
+				Size = UDim2.fromOffset(260, 76),
+				Position = UDim2.new(0, 0, 1, 0),
+				AnchorPoint = Vector2.new(0, 1),
+				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+				BorderSizePixel = 0,
+				Text = "",
+				AutoButtonColor = true,
+				[React.Event.Activated] = function()
+					if phase ~= "soloIntro" then
+						return
+					end
+					setPhase("countdown")
+				end,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 16) }),
+				Stroke = e("UIStroke", {
+					Color = Color3.fromRGB(0, 0, 0),
+					Thickness = 2,
+					Transparency = 0.4,
+				}),
+				Label = e("TextLabel", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundTransparency = 1,
+					Text = "Play Now",
+					TextColor3 = Color3.fromRGB(30, 30, 30),
+					TextSize = 36,
+					Font = Enum.Font.FredokaOne,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					TextYAlignment = Enum.TextYAlignment.Center,
+				}),
+			}),
 		})
 	elseif phase == "waiting" then
 		content = e(WaitingScreen, {
 			opponentName = opponentName,
 		})
-	elseif phase == "showing" or phase == "guessing" then
-		-- Unified showing → guessing view
+	elseif phase == "showing" or phase == "guessing"
+		or (isSolo and phase == "submitted")
+		or (isSolo and phase == "roundResult" and submittedAnim < 1) then
+		-- Unified showing → guessing → solo-slide-out view
 		-- During showing: full color frame with timer countdown
 		-- During guessing: timer fades out, picker slides in from left, preview is the guess color
+		-- During solo submitted / early roundResult: picker slides out to the left
 
 		local wholeSeconds = math.floor(smoothTime)
 		local millis = math.floor((smoothTime - wholeSeconds) * 100)
@@ -765,8 +1112,9 @@ local function GameController()
 		-- Background color: target during showing, transitions to guess color as picker appears
 		local bgColor = if phase == "showing" then targetColor else guessColor
 
-		-- Picker slides in from off-screen left. At progress=0, offset is -220 (hidden). At 1, offset is 0.
-		local pickerOffset = (1 - transitionProgress) * -220
+		-- Picker slides in from off-screen left during guessing entry, then
+		-- slides back out to the left when the player submits (submittedAnim).
+		local pickerOffset = (1 - transitionProgress) * -220 - submittedAnim * 220
 
 		-- Timer text transparency increases during fade
 		local timerTextAlpha = if phase == "showing" then 0.1 else math.min(0.1 + textFade * 0.9, 1)
@@ -793,7 +1141,7 @@ local function GameController()
 			-- Round counter top-left (stays visible through transition)
 			RoundLabel = roundLabel ~= "" and StrokedText({
 				Size = UDim2.fromOffset(100, 28),
-				Position = UDim2.new(0, if transitionProgress > 0 then 200 else 0, 0, 0),
+				Position = UDim2.new(0, if transitionProgress > 0 then 224 else 0, 0, 0),
 				BackgroundTransparency = 1,
 				Text = roundLabel,
 				TextColor3 = Color3.fromRGB(255, 255, 255),
@@ -806,7 +1154,7 @@ local function GameController()
 
 			-- Timer: centered frame, UIListLayout handles alignment
 			TimerArea = e("Frame", {
-				Size = UDim2.fromOffset(200, 110),
+				Size = UDim2.fromOffset(260, 130),
 				Position = UDim2.fromScale(0.5, 0.4),
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
@@ -868,13 +1216,13 @@ local function GameController()
 
 				-- Subtitle below the row
 				Subtitle = StrokedText({
-					Size = UDim2.new(1, 0, 0, 22),
-					Position = UDim2.fromOffset(0, 84),
+					Size = UDim2.new(1, 0, 0, 34),
+					Position = UDim2.fromOffset(0, 88),
 					BackgroundTransparency = 1,
 					Text = "Seconds to remember",
 					TextColor3 = Color3.fromRGB(255, 255, 255),
 					TextTransparency = timerSubAlpha,
-					TextSize = 16,
+					TextSize = 26,
 					Font = Enum.Font.FredokaOne,
 				}),
 			}),
@@ -944,8 +1292,8 @@ local function GameController()
 				}),
 			}) or nil,
 
-			-- Color picker strips (slide in from left)
-			PickerWrapper = (phase == "guessing") and e("Frame", {
+			-- Color picker strips (slide in from left, then slide out left on solo submit)
+			PickerWrapper = (phase ~= "showing") and e("Frame", {
 				Size = UDim2.new(0, 200, 1, 0),
 				Position = UDim2.new(0, pickerOffset, 0, 0),
 				BackgroundTransparency = 1,
@@ -1000,83 +1348,558 @@ local function GameController()
 		})
 	elseif phase == "matchEnd" then
 		if isSolo then
+			-- Compute total score across all rounds (max = roundCount * 100)
+			local totalScore = 0
+			for _, entry in roundHistory do
+				totalScore += (entry.myScore or 0)
+			end
+			local maxScore = #roundHistory * 100
+			if maxScore <= 0 then
+				maxScore = soloTotalRounds * 100
+			end
+
+			local totalColor
+			local pct = if maxScore > 0 then totalScore / maxScore else 0
+			if pct >= 0.75 then
+				totalColor = Color3.fromRGB(120, 255, 140)
+			elseif pct >= 0.50 then
+				totalColor = Color3.fromRGB(255, 230, 120)
+			elseif pct >= 0.25 then
+				totalColor = Color3.fromRGB(255, 170, 110)
+			else
+				totalColor = Color3.fromRGB(255, 120, 120)
+			end
+
+			local cardChildren: { [string]: any } = {
+				Layout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					HorizontalAlignment = Enum.HorizontalAlignment.Center,
+					VerticalAlignment = Enum.VerticalAlignment.Center,
+					Padding = UDim.new(0, 14),
+				}),
+			}
+			for i, entry in roundHistory do
+				local target = entry.target or { h = 0, s = 0, v = 0 }
+				local guess = entry.myGuess or { h = 0, s = 0, v = 0 }
+				cardChildren["Card" .. i] = e(DiamondCard, {
+					targetColor = Color3.fromHSV(target.h or 0, target.s or 0, target.v or 0),
+					guessColor = Color3.fromHSV(guess.h or 0, guess.s or 0, guess.v or 0),
+					score = entry.myScore or 0,
+					layoutOrder = i,
+				})
+			end
+
 			content = e("Frame", {
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
 			}, {
-				Layout = e("UIListLayout", {
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					HorizontalAlignment = Enum.HorizontalAlignment.Center,
-					VerticalAlignment = Enum.VerticalAlignment.Center,
-					Padding = UDim.new(0, 12),
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 40),
+					PaddingBottom = UDim.new(0, 32),
+					PaddingLeft = UDim.new(0, 48),
+					PaddingRight = UDim.new(0, 48),
 				}),
 
 				Title = StrokedText({
-					Size = UDim2.fromOffset(500, 44),
+					Size = UDim2.new(0.55, 0, 0, 56),
+					Position = UDim2.fromOffset(0, 0),
 					BackgroundTransparency = 1,
-					Text = "Practice Complete!",
+					Text = "Practice Complete",
 					TextColor3 = Color3.fromRGB(255, 255, 255),
-					TextSize = 36,
+					TextSize = 42,
 					Font = Enum.Font.FredokaOne,
-					LayoutOrder = 1,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
 				}),
 
-				Average = StrokedText({
-					Size = UDim2.fromOffset(500, 36),
+				Total = StrokedText({
+					Size = UDim2.new(0.45, 0, 0, 64),
+					Position = UDim2.new(1, 0, 0, 0),
+					AnchorPoint = Vector2.new(1, 0),
 					BackgroundTransparency = 1,
-					Text = `Average: {soloAverage}%   Best: {soloBest}%`,
-					TextColor3 = if soloAverage >= 70 then Color3.fromRGB(100, 255, 100)
-						elseif soloAverage >= 40 then Color3.fromRGB(255, 255, 100)
-						else Color3.fromRGB(255, 100, 100),
-					TextSize = 28,
+					Text = `{totalScore} / {maxScore}`,
+					TextColor3 = totalColor,
+					TextSize = 56,
 					Font = Enum.Font.FredokaOne,
-					LayoutOrder = 2,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					TextYAlignment = Enum.TextYAlignment.Top,
 				}),
 
-				History = e(HistoryGrid, {
-					history = roundHistory,
-					isSolo = true,
-					LayoutOrder = 3,
+				Flair = StrokedText({
+					Size = UDim2.new(1, 0, 0, 28),
+					Position = UDim2.fromOffset(0, 60),
+					BackgroundTransparency = 1,
+					Text = endFlairText,
+					TextColor3 = Color3.fromRGB(220, 220, 220),
+					TextTransparency = 0.1,
+					TextSize = 22,
+					Font = Enum.Font.FredokaOne,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+				}),
+
+				Cards = e("Frame", {
+					Size = UDim2.new(1, 0, 0, 130),
+					Position = UDim2.fromScale(0.5, 0.5),
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+				}, cardChildren),
+
+				DoneButton = e("TextButton", {
+					Size = UDim2.fromOffset(160, 64),
+					Position = UDim2.new(0, 0, 1, 0),
+					AnchorPoint = Vector2.new(0, 1),
+					BackgroundColor3 = Color3.fromRGB(20, 20, 20),
+					BackgroundTransparency = 0.2,
+					BorderSizePixel = 0,
+					AutoButtonColor = true,
+					Text = "",
+					[React.Event.Activated] = function()
+						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+						if remotes then
+							local leave = remotes:FindFirstChild("LeaveTable")
+							if leave then
+								leave:FireServer()
+							end
+						end
+						setPhase("idle")
+					end,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+					Stroke = e("UIStroke", {
+						Color = Color3.fromRGB(255, 255, 255),
+						Thickness = 2,
+						Transparency = 0.3,
+					}),
+					Label = e("TextLabel", {
+						Size = UDim2.fromScale(1, 1),
+						BackgroundTransparency = 1,
+						Text = "Done",
+						TextColor3 = Color3.fromRGB(230, 230, 230),
+						TextSize = 26,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Center,
+						TextYAlignment = Enum.TextYAlignment.Center,
+					}),
+				}),
+
+				PlayAgainButton = e("TextButton", {
+					Size = UDim2.fromOffset(280, 76),
+					Position = UDim2.new(1, 0, 1, 0),
+					AnchorPoint = Vector2.new(1, 1),
+					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+					BorderSizePixel = 0,
+					AutoButtonColor = true,
+					Text = "",
+					[React.Event.Activated] = function()
+						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+						if remotes then
+							local restart = remotes:FindFirstChild("RestartSolo")
+							if restart then
+								restart:FireServer()
+							end
+						end
+					end,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+					Stroke = e("UIStroke", {
+						Color = Color3.fromRGB(0, 0, 0),
+						Thickness = 2,
+						Transparency = 0.4,
+					}),
+					Label = e("TextLabel", {
+						Size = UDim2.fromScale(1, 1),
+						BackgroundTransparency = 1,
+						Text = "Play Again",
+						TextColor3 = Color3.fromRGB(30, 30, 30),
+						TextSize = 32,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Center,
+						TextYAlignment = Enum.TextYAlignment.Center,
+					}),
 				}),
 			})
 		else
+			-- 1v1 end screen — diamond cards in two stacked rows. The winning
+			-- player is rendered larger, with a crown above their avatar and
+			-- a gold name. Per-round wins are highlighted with a gold stroke
+			-- on the diamond cards.
+			local myWinsCount = 0
+			local oppWinsCount = 0
+			local myPerceptualSum = 0
+			local oppPerceptualSum = 0
+			for _, entry in roundHistory do
+				if entry.outcome == "win" then
+					myWinsCount += 1
+				elseif entry.outcome == "loss" then
+					oppWinsCount += 1
+				end
+				myPerceptualSum += (entry.myScore or 0)
+				oppPerceptualSum += (entry.opponentScore or 0)
+			end
+
+			local localPlayer = Players.LocalPlayer
+			local myName = (localPlayer and localPlayer.DisplayName) or "You"
+
+			local isTie = myWinsCount == oppWinsCount
+			local iWon = (not isTie) and matchWon
+			local oppWonMatch = (not isTie) and (not matchWon)
+
+			local titleText
+			local titleColor
+			if isTie then
+				titleText = "Draw"
+				titleColor = Color3.fromRGB(255, 230, 120)
+			elseif iWon then
+				titleText = "Victory!"
+				titleColor = Color3.fromRGB(255, 215, 0) -- gold
+			else
+				titleText = "Defeat"
+				titleColor = Color3.fromRGB(220, 90, 90)
+			end
+
+			-- Build the per-row diamond children for one player. `forSelf`
+			-- selects which guess/score to render; `cardSize` and `wonRound`
+			-- control the per-card visuals.
+			local function buildRowCards(forSelf: boolean, cardSize: number)
+				local children: { [string]: any } = {
+					Layout = e("UIListLayout", {
+						FillDirection = Enum.FillDirection.Horizontal,
+						SortOrder = Enum.SortOrder.LayoutOrder,
+						HorizontalAlignment = Enum.HorizontalAlignment.Right,
+						VerticalAlignment = Enum.VerticalAlignment.Center,
+						Padding = UDim.new(0, 8),
+					}),
+				}
+				for i, entry in roundHistory do
+					local target = entry.target or { h = 0, s = 0, v = 0 }
+					local guess = if forSelf
+						then (entry.myGuess or { h = 0, s = 0, v = 0 })
+						else (entry.opponentGuess or { h = 0, s = 0, v = 0 })
+					local score = if forSelf then (entry.myScore or 0) else (entry.opponentScore or 0)
+					-- "win" means I won this round; flip for the opponent row.
+					local wonRound = if forSelf
+						then entry.outcome == "win"
+						else entry.outcome == "loss"
+					children["Card" .. i] = e(DiamondCard, {
+						targetColor = Color3.fromHSV(target.h or 0, target.s or 0, target.v or 0),
+						guessColor = Color3.fromHSV(guess.h or 0, guess.s or 0, guess.v or 0),
+						score = score,
+						size = cardSize,
+						wonRound = wonRound,
+						layoutOrder = i,
+					})
+				end
+				return children
+			end
+
+			local function buildPlayerRow(args: {
+				userId: number,
+				name: string,
+				wins: number,
+				perceptualSum: number,
+				forSelf: boolean,
+				isWinner: boolean,
+				positionY: number,
+			})
+				local thumbUrl = if args.userId and args.userId > 0
+					then `rbxthumb://type=AvatarHeadShot&id={args.userId}&w=150&h=150`
+					else ""
+				local rowHeight = if args.isWinner then 120 else 92
+				local avatarSize = if args.isWinner then 88 else 60
+				local cardSize = if args.isWinner then 86 else 70
+				local nameSize = if args.isWinner then 26 else 20
+				local nameColor = if args.isWinner
+					then Color3.fromRGB(255, 215, 0)
+					else Color3.fromRGB(230, 230, 230)
+				local statColor = if args.isWinner
+					then Color3.fromRGB(255, 235, 150)
+					else Color3.fromRGB(180, 180, 180)
+				local textLeftOffset = if args.isWinner then (avatarSize + 18) else (avatarSize + 14)
+
+				local children: { [string]: any } = {
+					AvatarBg = e("Frame", {
+						Size = UDim2.fromOffset(avatarSize, avatarSize),
+						Position = UDim2.new(0, 0, 0.5, 0),
+						AnchorPoint = Vector2.new(0, 0.5),
+						BackgroundTransparency = 1,
+					}, {
+						Avatar = e("ImageLabel", {
+							Size = UDim2.fromScale(1, 1),
+							BackgroundColor3 = Color3.fromRGB(40, 40, 40),
+							BorderSizePixel = 0,
+							Image = thumbUrl,
+						}, {
+							Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+							Stroke = e("UIStroke", {
+								Color = if args.isWinner
+									then Color3.fromRGB(255, 215, 0)
+									else Color3.fromRGB(255, 255, 255),
+								Thickness = if args.isWinner then 3 else 2,
+								Transparency = if args.isWinner then 0 else 0.4,
+							}),
+						}),
+						-- Crown sits above the avatar for the winning player
+						Crown = args.isWinner and e("ImageLabel", {
+							Size = UDim2.fromOffset(48, 48),
+							Position = UDim2.new(0.5, 0, 0, -8),
+							AnchorPoint = Vector2.new(0.5, 1),
+							BackgroundTransparency = 1,
+							Image = "rbxassetid://128383063987894",
+							ScaleType = Enum.ScaleType.Fit,
+							ZIndex = 3,
+						}) or nil,
+					}),
+					NameLabel = StrokedText({
+						Size = UDim2.fromOffset(140, nameSize + 6),
+						Position = UDim2.new(0, textLeftOffset, 0.5, -(nameSize / 2 + 4)),
+						AnchorPoint = Vector2.new(0, 0.5),
+						BackgroundTransparency = 1,
+						Text = args.name,
+						TextColor3 = nameColor,
+						TextSize = nameSize,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+					}),
+					StatLabel = StrokedText({
+						Size = UDim2.fromOffset(140, 22),
+						Position = UDim2.new(0, textLeftOffset, 0.5, nameSize / 2 - 2),
+						AnchorPoint = Vector2.new(0, 0.5),
+						BackgroundTransparency = 1,
+						Text = `{args.wins} wins  ·  {args.perceptualSum} pts`,
+						TextColor3 = statColor,
+						TextTransparency = 0.05,
+						TextSize = 18,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+					}),
+					Cards = e("Frame", {
+						Size = UDim2.new(1, -250, 1, 0),
+						Position = UDim2.new(1, 0, 0, 0),
+						AnchorPoint = Vector2.new(1, 0),
+						BackgroundTransparency = 1,
+					}, buildRowCards(args.forSelf, cardSize)),
+				}
+
+				return e("Frame", {
+					Size = UDim2.new(1, 0, 0, rowHeight),
+					Position = UDim2.fromOffset(0, args.positionY),
+					BackgroundTransparency = 1,
+				}, children)
+			end
+
+			-- Winner goes on top with the larger row. Tie = both same size,
+			-- self on top by convention. The top row is pushed down to leave
+			-- enough room for the crown (which floats above the avatar) to
+			-- clear the pill row above.
+			local myIsWinner = iWon
+			local oppIsWinner = oppWonMatch
+			local myRowY, oppRowY
+			if oppWonMatch then
+				-- Opponent is the winner — render them on top
+				oppRowY = 170
+				myRowY = 310
+			else
+				myRowY = 170
+				oppRowY = 310
+			end
+
+			-- Pill helper for the +cash / +win badges shown under the title.
+			-- Each pill is a dark rounded rectangle with an icon on the left
+			-- and text to its right. The icon spec is either an asset id or
+			-- "$" for an inline gold coin glyph (no asset required).
+			local function buildPill(args: {
+				icon: string,
+				iconKind: string, -- "asset" | "dollar"
+				label: string,
+				accent: Color3,
+				layoutOrder: number,
+			})
+				local iconSize = 32
+				local iconChild
+				if args.iconKind == "asset" then
+					iconChild = e("ImageLabel", {
+						Size = UDim2.fromOffset(iconSize, iconSize),
+						Position = UDim2.new(0, 8, 0.5, 0),
+						AnchorPoint = Vector2.new(0, 0.5),
+						BackgroundTransparency = 1,
+						Image = args.icon,
+						ScaleType = Enum.ScaleType.Fit,
+					})
+				else
+					-- Inline gold "$" coin built from primitives so it works
+					-- without uploading a currency asset.
+					iconChild = e("Frame", {
+						Size = UDim2.fromOffset(iconSize, iconSize),
+						Position = UDim2.new(0, 8, 0.5, 0),
+						AnchorPoint = Vector2.new(0, 0.5),
+						BackgroundColor3 = Color3.fromRGB(255, 215, 0),
+						BorderSizePixel = 0,
+					}, {
+						Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+						Stroke = e("UIStroke", {
+							Color = Color3.fromRGB(180, 130, 0),
+							Thickness = 2,
+							Transparency = 0.1,
+						}),
+						Glyph = e("TextLabel", {
+							Size = UDim2.fromScale(1, 1),
+							BackgroundTransparency = 1,
+							Text = "$",
+							TextColor3 = Color3.fromRGB(80, 50, 0),
+							TextSize = 22,
+							Font = Enum.Font.FredokaOne,
+							TextXAlignment = Enum.TextXAlignment.Center,
+							TextYAlignment = Enum.TextYAlignment.Center,
+						}),
+					})
+				end
+				return e("Frame", {
+					Size = UDim2.fromOffset(160, 48),
+					BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+					BackgroundTransparency = 0.15,
+					BorderSizePixel = 0,
+					LayoutOrder = args.layoutOrder,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+					Stroke = e("UIStroke", {
+						Color = args.accent,
+						Thickness = 2,
+						Transparency = 0.1,
+					}),
+					Icon = iconChild,
+					Label = StrokedText({
+						Size = UDim2.new(1, -52, 1, 0),
+						Position = UDim2.fromOffset(48, 0),
+						BackgroundTransparency = 1,
+						Text = args.label,
+						TextColor3 = args.accent,
+						TextSize = 22,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						TextYAlignment = Enum.TextYAlignment.Center,
+					}),
+				})
+			end
+
+			local pillChildren: { [string]: any } = {
+				Layout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					HorizontalAlignment = Enum.HorizontalAlignment.Center,
+					VerticalAlignment = Enum.VerticalAlignment.Center,
+					Padding = UDim.new(0, 14),
+				}),
+			}
+			local hasPills = false
+			if cashEarned and cashEarned > 0 then
+				hasPills = true
+				pillChildren.CashPill = buildPill({
+					icon = "$",
+					iconKind = "dollar",
+					label = `+{cashEarned}`,
+					accent = Color3.fromRGB(255, 220, 110),
+					layoutOrder = 1,
+				})
+			end
+			if iWon then
+				hasPills = true
+				pillChildren.WinPill = buildPill({
+					icon = "rbxassetid://128383063987894",
+					iconKind = "asset",
+					label = "+1 WIN",
+					accent = Color3.fromRGB(255, 215, 0),
+					layoutOrder = 2,
+				})
+			end
+
 			content = e("Frame", {
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
 			}, {
-				Layout = e("UIListLayout", {
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					HorizontalAlignment = Enum.HorizontalAlignment.Center,
-					VerticalAlignment = Enum.VerticalAlignment.Center,
-					Padding = UDim.new(0, 12),
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 28),
+					PaddingBottom = UDim.new(0, 28),
+					PaddingLeft = UDim.new(0, 48),
+					PaddingRight = UDim.new(0, 48),
 				}),
 
-				Result = StrokedText({
-					Size = UDim2.fromOffset(600, 56),
+				Title = StrokedText({
+					Size = UDim2.new(1, 0, 0, 60),
+					Position = UDim2.fromOffset(0, 0),
 					BackgroundTransparency = 1,
-					Text = if matchWon then "You Win!" else "You Lose",
-					TextColor3 = if matchWon
-						then Color3.fromRGB(100, 255, 100)
-						else Color3.fromRGB(255, 100, 100),
-					TextSize = 48,
+					Text = titleText,
+					TextColor3 = titleColor,
+					TextSize = 52,
 					Font = Enum.Font.FredokaOne,
-					LayoutOrder = 1,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					TextYAlignment = Enum.TextYAlignment.Top,
 				}),
 
-				Cash = matchWon and StrokedText({
-					Size = UDim2.fromOffset(400, 32),
+				PillRow = hasPills and e("Frame", {
+					Size = UDim2.new(1, 0, 0, 48),
+					Position = UDim2.fromOffset(0, 68),
 					BackgroundTransparency = 1,
-					Text = `+${cashEarned}`,
-					TextColor3 = Color3.fromRGB(50, 255, 50),
-					TextSize = 28,
-					Font = Enum.Font.FredokaOne,
-					LayoutOrder = 2,
+				}, pillChildren) or nil,
+
+				MyRow = buildPlayerRow({
+					userId = myUserId,
+					name = myName,
+					wins = myWinsCount,
+					perceptualSum = myPerceptualSum,
+					forSelf = true,
+					isWinner = myIsWinner,
+					positionY = myRowY,
 				}),
 
-				History = e(HistoryGrid, {
-					history = roundHistory,
-					isSolo = false,
-					LayoutOrder = 3,
+				OppRow = buildPlayerRow({
+					userId = opponentUserId,
+					name = if opponentName ~= "" then opponentName else "Opponent",
+					wins = oppWinsCount,
+					perceptualSum = oppPerceptualSum,
+					forSelf = false,
+					isWinner = oppIsWinner,
+					positionY = oppRowY,
+				}),
+
+				DoneButton = e("TextButton", {
+					Size = UDim2.fromOffset(220, 64),
+					Position = UDim2.new(1, 0, 1, 0),
+					AnchorPoint = Vector2.new(1, 1),
+					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+					BorderSizePixel = 0,
+					AutoButtonColor = true,
+					Text = "",
+					[React.Event.Activated] = function()
+						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+						if remotes then
+							local leave = remotes:FindFirstChild("LeaveTable")
+							if leave then
+								leave:FireServer()
+							end
+						end
+						setPhase("idle")
+					end,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+					Stroke = e("UIStroke", {
+						Color = Color3.fromRGB(0, 0, 0),
+						Thickness = 2,
+						Transparency = 0.4,
+					}),
+					Label = e("TextLabel", {
+						Size = UDim2.fromScale(1, 1),
+						BackgroundTransparency = 1,
+						Text = "Done",
+						TextColor3 = Color3.fromRGB(30, 30, 30),
+						TextSize = 30,
+						Font = Enum.Font.FredokaOne,
+						TextXAlignment = Enum.TextXAlignment.Center,
+						TextYAlignment = Enum.TextYAlignment.Center,
+					}),
 				}),
 			})
 		end
@@ -1155,6 +1978,47 @@ local function GameController()
 			}, {
 				Inner = content,
 			}),
+
+			-- Persistent exit button — floats in the top-right corner above
+			-- all phase content. Position offsets push past the Inner UIPadding
+			-- (20px) so the button sits flush against the rounded corner.
+			-- HIDDEN during active 1v1 gameplay so a player can't bail mid-match
+			-- on their opponent, on the matchEnd screen (Done button handles it),
+			-- and on the seated/waiting screen (LEAVE TABLE button handles it).
+			ExitButton = (function()
+				local hideForActive1v1 = (not isSolo) and (
+					phase == "countdown"
+					or phase == "showing"
+					or phase == "guessing"
+					or phase == "submitted"
+					or phase == "roundResult"
+					or phase == "seated"
+				)
+				if hideForActive1v1 or phase == "matchEnd" then
+					return nil
+				end
+				return e("ImageButton", {
+					Size = UDim2.fromOffset(54, 54),
+					Position = UDim2.new(1, 14, 0, -14),
+					AnchorPoint = Vector2.new(1, 0),
+					BackgroundTransparency = 1,
+					Image = "rbxassetid://118846091715989",
+					ImageTransparency = 0.1,
+					ScaleType = Enum.ScaleType.Fit,
+					ZIndex = 100,
+					AutoButtonColor = true,
+					[React.Event.Activated] = function()
+						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+						if remotes then
+							local leave = remotes:FindFirstChild("LeaveTable")
+							if leave then
+								leave:FireServer()
+							end
+						end
+						setPhase("idle")
+					end,
+				})
+			end)(),
 		}),
 	})
 end

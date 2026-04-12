@@ -112,6 +112,52 @@ local function easeOutBack(t: number): number
 	return 1 + c3 * (t - 1) ^ 3 + c1 * (t - 1) ^ 2
 end
 
+-- Flavor text shown under the solo score, picked once per round from the
+-- tier matching the player's score. Tiers are ordered high → low.
+local SCORE_FLAIR = {
+	{ min = 95, lines = {
+		"Your eyes don't lie.",
+		"Practically photographic.",
+		"Suspiciously good.",
+	}},
+	{ min = 85, lines = {
+		"Sharp eye.",
+		"Off by a hair.",
+		"Almost nailed it.",
+	}},
+	{ min = 70, lines = {
+		"In the right neighborhood.",
+		"Close enough to be proud.",
+		"Your brain held on to most of it.",
+	}},
+	{ min = 50, lines = {
+		"You're hovering near it.",
+		"Half-remembered.",
+		"Adjacent to correct.",
+		"Recognizable, at least.",
+	}},
+	{ min = 25, lines = {
+		"Your memory wandered.",
+		"The color drifted on the way over.",
+		"You remembered a different color.",
+	}},
+	{ min = 0, lines = {
+		"Your brain autocorrected to a different color entirely.",
+		"Was that even a color?",
+		"Bold choice. Wrong, but bold.",
+		"Even a random guess would've done better.",
+	}},
+}
+
+local function pickFlair(score: number): string
+	for _, tier in SCORE_FLAIR do
+		if score >= tier.min then
+			return tier.lines[math.random(1, #tier.lines)]
+		end
+	end
+	return ""
+end
+
 export type RevealScreenProps = {
 	targetColor: Color3,
 	guessColor: Color3,
@@ -284,8 +330,17 @@ local function RevealScreen(props: RevealScreenProps)
 	local checkmarkScale, setCheckmarkScale = React.useState(0)
 	local dotsRevealed, setDotsRevealed = React.useState(false)
 
-	-- Solo mode uses simpler animation
-	local revealProgress, setRevealProgress = React.useState(0)
+	-- Solo mode: staggered panel entrance (top first, then bottom)
+	local topPanelT, setTopPanelT = React.useState(0)
+	local bottomPanelT, setBottomPanelT = React.useState(0)
+	-- Flair line under the score — picked once per mount via a ref so it
+	-- stays stable across re-renders within the same round (Roact-compat
+	-- doesn't honor function initializers for useState).
+	local flairRef = React.useRef(nil :: string?)
+	if flairRef.current == nil then
+		flairRef.current = pickFlair(props.score)
+	end
+	local flairText = flairRef.current
 
 	local is1v1 = not props.solo and props.opponentName and props.opponentName ~= ""
 
@@ -369,26 +424,38 @@ local function RevealScreen(props: RevealScreenProps)
 				end
 			end)
 		else
-			-- Solo mode: simple slide + score counter
+			-- Solo mode: top panel slides in from above, then bottom from below,
+			-- then the score counts up. Each panel's color also lerps from grey
+			-- to its real color across its own slide so the reveal feels smooth.
 			task.spawn(function()
-				local slideStart = tick()
+				local startTime = tick()
+				local TOP_START = 0.0
+				local TOP_DUR = 0.55
+				local BOT_START = 0.40
+				local BOT_DUR = 0.55
+				local SCORE_START = 1.05
+				local SCORE_DUR = 0.85
+				local TOTAL = SCORE_START + SCORE_DUR
+
 				while running do
-					local t = math.clamp((tick() - slideStart) / 0.4, 0, 1)
-					local eased = 1 - (1 - t) * (1 - t)
-					setRevealProgress(eased)
-					if t >= 1 then break end
-					task.wait()
-				end
-				if not running then return end
-				local countStart = tick()
-				while running do
-					local t = math.clamp((tick() - countStart) / 0.8, 0, 1)
-					local eased = 1 - (1 - t) * (1 - t)
-					setAnimatedScore(math.floor(eased * props.score * 100 + 0.5) / 100)
-					if t >= 1 then break end
+					local elapsed = tick() - startTime
+
+					local tt = math.clamp((elapsed - TOP_START) / TOP_DUR, 0, 1)
+					setTopPanelT(1 - (1 - tt) * (1 - tt))
+
+					local bt = math.clamp((elapsed - BOT_START) / BOT_DUR, 0, 1)
+					setBottomPanelT(1 - (1 - bt) * (1 - bt))
+
+					local st = math.clamp((elapsed - SCORE_START) / SCORE_DUR, 0, 1)
+					local scoreEased = 1 - (1 - st) * (1 - st)
+					setAnimatedScore(math.floor(scoreEased * props.score * 100 + 0.5) / 100)
+
+					if elapsed >= TOTAL then break end
 					task.wait()
 				end
 				if running then
+					setTopPanelT(1)
+					setBottomPanelT(1)
 					setAnimatedScore(props.score)
 				end
 			end)
@@ -530,13 +597,21 @@ local function RevealScreen(props: RevealScreenProps)
 	end
 
 	local scoreText = string.format("%.2f", animatedScore)
-	local bottomOffset = (1 - revealProgress) * 50
 
 	-- Solo mode: original two-panel layout
 	local roundLabel = ""
 	if props.roundNumber and props.totalRounds then
 		roundLabel = `{props.roundNumber}/{props.totalRounds}`
 	end
+
+	local NEUTRAL = Color3.fromRGB(60, 60, 60)
+	local animatedGuess = NEUTRAL:Lerp(props.guessColor, topPanelT)
+	local animatedTarget = NEUTRAL:Lerp(props.targetColor, bottomPanelT)
+
+	-- Top panel slides down from above (y scale = -0.5 → 0)
+	local topY = -0.5 * (1 - topPanelT)
+	-- Bottom panel slides up from below (y scale = 1.0 → 0.5)
+	local bottomY = 0.5 + 0.5 * (1 - bottomPanelT)
 
 	return e("Frame", {
 		Size = UDim2.fromScale(1, 1),
@@ -545,8 +620,8 @@ local function RevealScreen(props: RevealScreenProps)
 	}, {
 		TopHalf = e("Frame", {
 			Size = UDim2.new(1, 0, 0.5, -2),
-			Position = UDim2.fromScale(0, 0),
-			BackgroundColor3 = props.guessColor,
+			Position = UDim2.new(0, 0, topY, 0),
+			BackgroundColor3 = animatedGuess,
 			BorderSizePixel = 0,
 		}, {
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 16) }),
@@ -577,25 +652,39 @@ local function RevealScreen(props: RevealScreenProps)
 				Font = Enum.Font.FredokaOne,
 				TextXAlignment = Enum.TextXAlignment.Right,
 			}),
+			FlairText = StrokedText({
+				Size = UDim2.new(0.6, 0, 0, 64),
+				Position = UDim2.new(1, 0, 0, 86),
+				AnchorPoint = Vector2.new(1, 0),
+				BackgroundTransparency = 1,
+				Text = flairText,
+				TextColor3 = Color3.fromRGB(255, 255, 255),
+				TextTransparency = 0.15,
+				TextSize = 22,
+				Font = Enum.Font.FredokaOne,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextYAlignment = Enum.TextYAlignment.Top,
+			}),
 			SelectionLabel = StrokedText({
-				Size = UDim2.new(1, 0, 0, 20),
-				Position = UDim2.new(0, 0, 1, -44),
+				Size = UDim2.new(1, 0, 0, 32),
+				Position = UDim2.new(0, 0, 1, -68),
 				BackgroundTransparency = 1,
 				Text = "Your selection",
 				TextColor3 = Color3.fromRGB(255, 255, 255),
 				TextTransparency = 0.5,
-				TextSize = 16,
+				TextSize = 28,
 				Font = Enum.Font.FredokaOne,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
 			SelectionHSV = StrokedText({
-				Size = UDim2.new(1, 0, 0, 22),
-				Position = UDim2.new(0, 0, 1, -22),
+				Size = UDim2.new(1, 0, 0, 36),
+				Position = UDim2.new(0, 0, 1, -36),
 				BackgroundTransparency = 1,
 				Text = guessHSV,
 				TextColor3 = Color3.fromRGB(255, 255, 255),
 				TextTransparency = 0.15,
-				TextSize = 18,
+				TextSize = 34,
 				Font = Enum.Font.FredokaOne,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
@@ -603,8 +692,8 @@ local function RevealScreen(props: RevealScreenProps)
 
 		BottomHalf = e("Frame", {
 			Size = UDim2.new(1, 0, 0.5, -2),
-			Position = UDim2.new(0, 0, 0.5, 2 + bottomOffset),
-			BackgroundColor3 = props.targetColor,
+			Position = UDim2.new(0, 0, bottomY, 2),
+			BackgroundColor3 = animatedTarget,
 			BorderSizePixel = 0,
 		}, {
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 16) }),
@@ -615,24 +704,24 @@ local function RevealScreen(props: RevealScreenProps)
 				PaddingRight = UDim.new(0, 20),
 			}),
 			OriginalLabel = StrokedText({
-				Size = UDim2.new(1, 0, 0, 20),
-				Position = UDim2.new(0, 0, 1, -44),
+				Size = UDim2.new(1, 0, 0, 32),
+				Position = UDim2.new(0, 0, 1, -68),
 				BackgroundTransparency = 1,
 				Text = "Original",
 				TextColor3 = Color3.fromRGB(255, 255, 255),
 				TextTransparency = 0.5,
-				TextSize = 16,
+				TextSize = 28,
 				Font = Enum.Font.FredokaOne,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
 			OriginalHSV = StrokedText({
-				Size = UDim2.new(1, 0, 0, 22),
-				Position = UDim2.new(0, 0, 1, -22),
+				Size = UDim2.new(1, 0, 0, 36),
+				Position = UDim2.new(0, 0, 1, -36),
 				BackgroundTransparency = 1,
 				Text = targetHSV,
 				TextColor3 = Color3.fromRGB(255, 255, 255),
 				TextTransparency = 0.15,
-				TextSize = 18,
+				TextSize = 34,
 				Font = Enum.Font.FredokaOne,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),

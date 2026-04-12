@@ -72,11 +72,14 @@ function MatchController:Start()
 		roundsToWin = Constants.ROUNDS_TO_WIN,
 	})
 
-	task.wait(1)
-	self:StartRound()
+	-- Round 1 begins with a "Ready / Set / GO!" countdown on the clients.
+	-- StartRound(true) sends the color immediately so the GO! frame can paint
+	-- it as the background, then waits for both players to signal BeginRound
+	-- before starting the show-duration timer.
+	self:StartRound(true)
 end
 
-function MatchController:StartRound()
+function MatchController:StartRound(waitForBegin: boolean?)
 	if self.finished then
 		return
 	end
@@ -84,6 +87,10 @@ function MatchController:StartRound()
 	-- Clean up any lingering state from previous round
 	self:DisconnectGuess()
 	self:CancelThreads()
+	if self.beginConnection then
+		self.beginConnection:Disconnect()
+		self.beginConnection = nil
+	end
 	self.roundNumber += 1
 	self.player1Guess = nil
 	self.player2Guess = nil
@@ -91,8 +98,6 @@ function MatchController:StartRound()
 	self.targetH = math.random()
 	self.targetS = math.random()
 	self.targetV = math.random()
-
-	self.phase = "showing"
 
 	local colorData = {
 		h = self.targetH,
@@ -105,9 +110,54 @@ function MatchController:StartRound()
 	getRemote("RoundShowColor"):FireClient(self.player1, colorData)
 	getRemote("RoundShowColor"):FireClient(self.player2, colorData)
 
-	self:ScheduleDelay(Constants.SHOW_DURATION, function()
-		self:StartGuessing()
-	end)
+	if waitForBegin then
+		-- Wait until BOTH players' clients finish their countdown and fire
+		-- BeginRound, then start the show timer. This keeps the two clients'
+		-- timers in sync regardless of network jitter.
+		self.phase = "showColorPending"
+		local p1Ready = false
+		local p2Ready = false
+		self.beginConnection = getRemote("BeginRound").OnServerEvent:Connect(function(player)
+			if self.phase ~= "showColorPending" then
+				return
+			end
+			if player == self.player1 then
+				p1Ready = true
+			elseif player == self.player2 then
+				p2Ready = true
+			end
+			if p1Ready and p2Ready then
+				if self.beginConnection then
+					self.beginConnection:Disconnect()
+					self.beginConnection = nil
+				end
+				self.phase = "showing"
+				self:ScheduleDelay(Constants.SHOW_DURATION, function()
+					self:StartGuessing()
+				end)
+			end
+		end)
+		-- Safety fallback: if a client never signals (e.g. silently dropped
+		-- the packet), still start the round after a generous delay so the
+		-- match doesn't hang forever.
+		self:ScheduleDelay(4, function()
+			if self.phase == "showColorPending" then
+				if self.beginConnection then
+					self.beginConnection:Disconnect()
+					self.beginConnection = nil
+				end
+				self.phase = "showing"
+				self:ScheduleDelay(Constants.SHOW_DURATION, function()
+					self:StartGuessing()
+				end)
+			end
+		end)
+	else
+		self.phase = "showing"
+		self:ScheduleDelay(Constants.SHOW_DURATION, function()
+			self:StartGuessing()
+		end)
+	end
 end
 
 function MatchController:DisconnectGuess()
@@ -321,6 +371,7 @@ function MatchController:EndMatch(winner: Player, loser: Player)
 
 	ProfileService.AddCash(winner, Constants.WIN_REWARD)
 	ProfileService.AddWin(winner)
+	ProfileService.ResetStreak(loser)
 
 	local winnerData = ProfileService.GetData(winner)
 	local loserData = ProfileService.GetData(loser)
@@ -361,6 +412,8 @@ function MatchController:PlayerDisconnected(player: Player)
 
 	ProfileService.AddCash(winner, Constants.WIN_REWARD)
 	ProfileService.AddWin(winner)
+	-- The disconnecting player's streak ends here, even though they're gone.
+	ProfileService.ResetStreak(player)
 
 	local winnerData = ProfileService.GetData(winner)
 
@@ -380,6 +433,10 @@ end
 function MatchController:Cleanup()
 	self:DisconnectGuess()
 	self:CancelThreads()
+	if self.beginConnection then
+		self.beginConnection:Disconnect()
+		self.beginConnection = nil
+	end
 	if self.onComplete then
 		task.defer(self.onComplete)
 	end
