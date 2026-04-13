@@ -12,6 +12,7 @@ local WinsHud = require(script:WaitForChild("WinsHud"))
 local StreakHud = require(script:WaitForChild("StreakHud"))
 local InventoryHud = require(script:WaitForChild("InventoryHud"))
 local NotificationHud = require(script:WaitForChild("NotificationHud"))
+local HintShop = require(script:WaitForChild("HintShop"))
 local App = require(script:WaitForChild("ui"):WaitForChild("App"))
 
 local localPlayer = Players.LocalPlayer
@@ -23,6 +24,7 @@ WinsHud.Start()
 StreakHud.Start()
 InventoryHud.Start()
 NotificationHud.Start()
+HintShop.Start()
 
 -- Listen for server-sent notifications (e.g. purchase confirmations).
 local remotes = ReplicatedStorage:WaitForChild("Remotes")

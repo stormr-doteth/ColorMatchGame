@@ -16,6 +16,9 @@ local REMOTE_NAMES = {
 	"PurchaseChair",
 	"EquipChair",
 	"ShowNotification",
+	"HintActivated",
+	"MatchColorActivated",
+	"GuessPreview",
 }
 
 local RemoteSetup = {}

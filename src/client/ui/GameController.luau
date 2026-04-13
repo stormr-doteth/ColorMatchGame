@@ -351,6 +351,8 @@ end
 local function GameController()
 	-- UI scale
 	local uiScale, setUIScale = React.useState(1)
+	local dismissScale, setDismissScale = React.useState(1)
+	local closing, setClosing = React.useState(false)
 
 	-- Match state
 	local phase, setPhase = React.useState("idle") -- idle|seated|waiting|showing|guessing|submitted|roundResult|matchEnd
@@ -396,9 +398,63 @@ local function GameController()
 	-- Store guess color at submit time for the result screen
 	local submittedColor, setSubmittedColor = React.useState(Color3.new(0.5, 0.5, 0.5))
 
+	-- Hint developer product state
+	local hintActive, setHintActive = React.useState(false)
+	local hintPopScale, setHintPopScale = React.useState(0) -- 0=hidden, 1=settled
+
 	-- Player info bar slide animation (1v1 only)
 	local infoBarSlide, setInfoBarSlide = React.useState(0)
 	local prevPhaseRef = React.useRef("idle")
+
+	-- Pop-close animation: scale up slightly then shrink to 0
+	local handleClose = React.useCallback(function()
+		if closing then return end
+		setClosing(true)
+		local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+		if remotes then
+			local leave = remotes:FindFirstChild("LeaveTable")
+			if leave then
+				leave:FireServer()
+			end
+		end
+	end, { closing })
+
+	React.useEffect(function()
+		if not closing then return end
+		local cancelled = false
+		task.spawn(function()
+			-- Pop out: scale up slightly
+			local popDuration = 0.1
+			local shrinkDuration = 0.2
+			local startTime = os.clock()
+			while not cancelled do
+				local elapsed = os.clock() - startTime
+				if elapsed < popDuration then
+					-- Ease out to 1.08
+					local t = elapsed / popDuration
+					setDismissScale(1 + 0.08 * t)
+				elseif elapsed < popDuration + shrinkDuration then
+					-- Shrink from 1.08 to 0 with ease-in
+					local t = (elapsed - popDuration) / shrinkDuration
+					local eased = t * t -- ease-in (accelerate)
+					setDismissScale(1.08 * (1 - eased))
+				else
+					break
+				end
+				task.wait()
+			end
+			if not cancelled then
+				setDismissScale(1)
+				setClosing(false)
+				setPhase("idle")
+			end
+		end)
+		return function()
+			cancelled = true
+			setDismissScale(1)
+			setClosing(false)
+		end
+	end, { closing })
 
 	-- Viewport scale tracking
 	React.useEffect(function()
@@ -415,6 +471,85 @@ local function GameController()
 			conn:Disconnect()
 		end
 	end, {})
+
+	-- Hint attribute listener (bridge from imperative HintShop to React)
+	React.useEffect(function()
+		local player = Players.LocalPlayer
+		local function sync()
+			setHintActive(player:GetAttribute("HintActive") == true)
+		end
+		sync()
+		local conn = player:GetAttributeChangedSignal("HintActive"):Connect(sync)
+		return function()
+			conn:Disconnect()
+		end
+	end, {})
+
+	-- Match Color: snap sliders to target color when activated
+	React.useEffect(function()
+		local player = Players.LocalPlayer
+		local conn = player:GetAttributeChangedSignal("MatchColorActive"):Connect(function()
+			if player:GetAttribute("MatchColorActive") == true then
+				setGuessH(targetH)
+				setGuessS(targetS)
+				setGuessV(targetV)
+			end
+		end)
+		return function()
+			conn:Disconnect()
+		end
+	end, { targetH, targetS, targetV })
+
+	-- Send guess preview to server so table papers update in real time
+	React.useEffect(function()
+		if phase == "guessing" or phase == "submitted" then
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			if remotes then
+				local preview = remotes:FindFirstChild("GuessPreview")
+				if preview then
+					preview:FireServer({ h = guessH, s = guessS, v = guessV })
+				end
+			end
+		end
+	end, { guessH, guessS, guessV, phase })
+
+	-- Hint pop-in animation: overshoot then settle
+	React.useEffect(function()
+		if not hintActive then
+			setHintPopScale(0)
+			return
+		end
+		-- Animate: 0 → 1.2 → 1.0 over 0.35s
+		local running = true
+		setHintPopScale(0)
+		task.spawn(function()
+			local start = tick()
+			local duration = 0.35
+			while running do
+				local t = math.clamp((tick() - start) / duration, 0, 1)
+				-- Elastic overshoot: rises to ~1.2 then settles to 1.0
+				local scale
+				if t < 0.6 then
+					-- Ease out to overshoot (0 → 1.2)
+					local p = t / 0.6
+					scale = 1.2 * (1 - (1 - p) * (1 - p))
+				else
+					-- Settle back (1.2 → 1.0)
+					local p = (t - 0.6) / 0.4
+					scale = 1.2 - 0.2 * p
+				end
+				setHintPopScale(scale)
+				if t >= 1 then break end
+				task.wait()
+			end
+			if running then
+				setHintPopScale(1)
+			end
+		end)
+		return function()
+			running = false
+		end
+	end, { hintActive })
 
 	-- Connect to server RemoteEvents
 	React.useEffect(function()
@@ -988,16 +1123,7 @@ local function GameController()
 				AutoButtonColor = true,
 				Text = "",
 				LayoutOrder = 4,
-				[React.Event.Activated] = function()
-					local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-					if remotes then
-						local leave = remotes:FindFirstChild("LeaveTable")
-						if leave then
-							leave:FireServer()
-						end
-					end
-					setPhase("idle")
-				end,
+				[React.Event.Activated] = handleClose,
 			}, {
 				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
 				Stroke = e("UIStroke", {
@@ -1308,6 +1434,34 @@ local function GameController()
 					onChangeV = setGuessV,
 				}),
 			}),
+
+			-- Hint swatch: mini target color reference (1v1 only, after purchase)
+			HintSwatch = (phase == "guessing" and hintActive and not isSolo and hintPopScale > 0) and e("Frame", {
+				Size = UDim2.fromOffset(96, 96),
+				Position = UDim2.new(0, 220, 1, -20),
+				AnchorPoint = Vector2.new(0, 1),
+				BackgroundColor3 = targetColor,
+				BorderSizePixel = 0,
+				ZIndex = 10,
+			}, {
+				Scale = e("UIScale", { Scale = hintPopScale }),
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
+				Stroke = e("UIStroke", {
+					Color = Color3.fromRGB(255, 255, 255),
+					Thickness = 2,
+					Transparency = 0.3,
+				}),
+				Label = StrokedText({
+					Size = UDim2.new(1, 0, 0, 18),
+					Position = UDim2.new(0.5, 0, 0, -20),
+					AnchorPoint = Vector2.new(0.5, 0),
+					BackgroundTransparency = 1,
+					Text = "HINT",
+					TextColor3 = Color3.fromRGB(255, 255, 255),
+					TextSize = 14,
+					Font = Enum.Font.FredokaOne,
+				}),
+			}) or nil,
 		})
 	elseif phase == "submitted" then
 		content = e(WaitingScreen, {
@@ -1456,14 +1610,7 @@ local function GameController()
 					AutoButtonColor = true,
 					Text = "",
 					[React.Event.Activated] = function()
-						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-						if remotes then
-							local leave = remotes:FindFirstChild("LeaveTable")
-							if leave then
-								leave:FireServer()
-							end
-						end
-						setPhase("idle")
+						handleClose()
 					end,
 				}, {
 					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
@@ -1608,7 +1755,13 @@ local function GameController()
 					else ""
 				local rowHeight = if args.isWinner then 120 else 92
 				local avatarSize = if args.isWinner then 88 else 60
-				local cardSize = if args.isWinner then 86 else 70
+				local baseCardSize = if args.isWinner then 86 else 70
+				-- Shrink cards when many rounds so they don't overflow into the name area.
+				local maxCardsWidth = 414
+				local numRounds = #roundHistory
+				local cardSize = if numRounds > 0
+					then math.min(baseCardSize, math.floor((maxCardsWidth - (numRounds - 1) * 8) / numRounds))
+					else baseCardSize
 				local nameSize = if args.isWinner then 26 else 20
 				local nameColor = if args.isWinner
 					then Color3.fromRGB(255, 215, 0)
@@ -1873,16 +2026,7 @@ local function GameController()
 					BorderSizePixel = 0,
 					AutoButtonColor = true,
 					Text = "",
-					[React.Event.Activated] = function()
-						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-						if remotes then
-							local leave = remotes:FindFirstChild("LeaveTable")
-							if leave then
-								leave:FireServer()
-							end
-						end
-						setPhase("idle")
-					end,
+					[React.Event.Activated] = handleClose,
 				}, {
 					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
 					Stroke = e("UIStroke", {
@@ -1933,7 +2077,7 @@ local function GameController()
 			Active = true,
 		}, {
 			Scale = e("UIScale", {
-				Scale = uiScale,
+				Scale = uiScale * dismissScale,
 			}),
 
 			Corner = e("UICorner", {
@@ -2007,16 +2151,7 @@ local function GameController()
 					ScaleType = Enum.ScaleType.Fit,
 					ZIndex = 100,
 					AutoButtonColor = true,
-					[React.Event.Activated] = function()
-						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-						if remotes then
-							local leave = remotes:FindFirstChild("LeaveTable")
-							if leave then
-								leave:FireServer()
-							end
-						end
-						setPhase("idle")
-					end,
+					[React.Event.Activated] = handleClose,
 				})
 			end)(),
 		}),

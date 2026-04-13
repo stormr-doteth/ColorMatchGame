@@ -18,12 +18,14 @@ end
 local MatchController = {}
 MatchController.__index = MatchController
 
-function MatchController.new(player1: Player, player2: Player, onComplete: () -> ())
+function MatchController.new(player1: Player, player2: Player, onComplete: () -> (), tableModel: Model?, billboard: BillboardGui?)
 	local self = setmetatable({}, MatchController)
 
 	self.player1 = player1
 	self.player2 = player2
 	self.onComplete = onComplete
+	self.tableModel = tableModel
+	self.tableBillboard = billboard
 
 	self.roundNumber = 0
 	self.player1Wins = 0
@@ -42,7 +44,254 @@ function MatchController.new(player1: Player, player2: Player, onComplete: () ->
 	self.guessConnection = nil :: RBXScriptConnection?
 	self.threads = {} :: { thread }
 
+	-- Table paper parts for spectators
+	self.targetPaper = nil :: BasePart?
+	self.player1Paper = nil :: BasePart?
+	self.player2Paper = nil :: BasePart?
+	self.previewConnection = nil :: RBXScriptConnection?
+
+	-- Per-player score billboards above their heads
+	self.p1Billboard = nil :: BillboardGui?
+	self.p2Billboard = nil :: BillboardGui?
+	self.p1WinsLabel = nil :: TextLabel?
+	self.p2WinsLabel = nil :: TextLabel?
+	self.p1Pips = {} :: { BasePart }
+	self.p2Pips = {} :: { BasePart }
+	self.pipDir1 = Vector3.zero
+	self.pipDir2 = Vector3.zero
+	self.pipTopY = 0
+	self.pipBasePos1 = Vector3.zero
+	self.pipBasePos2 = Vector3.zero
+
 	return self
+end
+
+-- Create paper parts on the table surface so spectators can watch the match
+function MatchController:CreatePapers()
+	local model = self.tableModel
+	if not model then return end
+
+	local tablePart = model:FindFirstChild("Table")
+	if not tablePart then return end
+
+	local seat1 = model:FindFirstChild("Chair1") and model.Chair1:FindFirstChildWhichIsA("Seat", true)
+	local seat2 = model:FindFirstChild("Chair2") and model.Chair2:FindFirstChildWhichIsA("Seat", true)
+	if not seat1 or not seat2 then return end
+
+	local tablePos = tablePart.Position
+	local topY = tablePos.Y + tablePart.Size.Y / 2 + 0.02
+
+	-- Direction from table center to each seat (horizontal only)
+	local toSeat1 = (seat1.Position - tablePos) * Vector3.new(1, 0, 1)
+	local toSeat2 = (seat2.Position - tablePos) * Vector3.new(1, 0, 1)
+	local dir1 = toSeat1.Unit
+	local dir2 = toSeat2.Unit
+
+	local function makePaper(name: string, position: Vector3, size: Vector3): Part
+		local paper = Instance.new("Part")
+		paper.Name = name
+		paper.Size = size
+		paper.Position = position
+		paper.Anchored = true
+		paper.CanCollide = false
+		paper.Color = Color3.fromRGB(255, 255, 255)
+		paper.Material = Enum.Material.SmoothPlastic
+		paper.TopSurface = Enum.SurfaceType.Smooth
+		paper.BottomSurface = Enum.SurfaceType.Smooth
+		paper.Parent = model
+		return paper
+	end
+
+	-- Target paper in center
+	self.targetPaper = makePaper(
+		"TargetPaper",
+		Vector3.new(tablePos.X, topY, tablePos.Z),
+		Vector3.new(1.2, 0.05, 1.2)
+	)
+
+	-- Player papers offset toward their seats
+	local offset = 1.2
+	self.player1Paper = makePaper(
+		"Player1Paper",
+		Vector3.new(tablePos.X, topY, tablePos.Z) + dir1 * offset,
+		Vector3.new(1.0, 0.05, 1.0)
+	)
+	self.player2Paper = makePaper(
+		"Player2Paper",
+		Vector3.new(tablePos.X, topY, tablePos.Z) + dir2 * offset,
+		Vector3.new(1.0, 0.05, 1.0)
+	)
+
+	-- Store directions and positions for pip placement
+	self.pipDir1 = dir1
+	self.pipDir2 = dir2
+	self.pipTopY = topY
+	self.pipBasePos1 = self.player1Paper.Position
+	self.pipBasePos2 = self.player2Paper.Position
+
+	-- Hide the table's default billboard during the match
+	if self.tableBillboard then
+		local playerCount = self.tableBillboard:FindFirstChild("PlayerCount")
+		local reward = self.tableBillboard:FindFirstChild("Reward")
+		if playerCount then playerCount.Visible = false end
+		if reward then reward.Visible = false end
+	end
+
+	-- Per-player score billboards above their heads
+	local function makePlayerBillboard(player: Player, winsCount: number)
+		local character = player.Character
+		local head = character and character:FindFirstChild("Head")
+		if not head then return nil, nil end
+
+		local bb = Instance.new("BillboardGui")
+		bb.Name = "MatchScoreBB"
+		bb.Size = UDim2.new(4, 0, 1.2, 0)
+		bb.StudsOffset = Vector3.new(0, 2.5, 0)
+		bb.AlwaysOnTop = false
+		bb.LightInfluence = 0
+		bb.MaxDistance = 50
+		bb.Adornee = head
+		bb.Parent = head
+
+		local winsLabel = Instance.new("TextLabel")
+		winsLabel.Name = "WinsLabel"
+		winsLabel.Size = UDim2.fromScale(1, 1)
+		winsLabel.BackgroundTransparency = 1
+		winsLabel.Text = `{player.DisplayName}  ⭐ {winsCount}`
+		winsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		winsLabel.TextScaled = true
+		winsLabel.Font = Enum.Font.FredokaOne
+		winsLabel.Parent = bb
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Color = Color3.fromRGB(0, 0, 0)
+		stroke.Parent = winsLabel
+
+		return bb, winsLabel
+	end
+
+	self.p1Billboard, self.p1WinsLabel = makePlayerBillboard(self.player1, 0)
+	self.p2Billboard, self.p2WinsLabel = makePlayerBillboard(self.player2, 0)
+
+	-- Listen to GuessPreview remote for real-time paper color updates
+	self.previewConnection = getRemote("GuessPreview").OnServerEvent:Connect(function(player, data)
+		if typeof(data) ~= "table" then return end
+		local h = math.clamp(tonumber(data.h) or 0, 0, 1)
+		local s = math.clamp(tonumber(data.s) or 0, 0, 1)
+		local v = math.clamp(tonumber(data.v) or 0, 0, 1)
+		local color = Color3.fromHSV(h, s, v)
+
+		if player == self.player1 and self.player1Paper then
+			self.player1Paper.Color = color
+		elseif player == self.player2 and self.player2Paper then
+			self.player2Paper.Color = color
+		end
+	end)
+end
+
+function MatchController:UpdateTargetPaper()
+	if self.targetPaper then
+		self.targetPaper.Color = Color3.fromHSV(self.targetH, self.targetS, self.targetV)
+	end
+end
+
+function MatchController:UpdateScoreboard(roundWinner: number?)
+	if self.p1WinsLabel then
+		self.p1WinsLabel.Text = `{self.player1.DisplayName}  ⭐ {self.player1Wins}`
+	end
+	if self.p2WinsLabel then
+		self.p2WinsLabel.Text = `{self.player2.DisplayName}  ⭐ {self.player2Wins}`
+	end
+
+	-- Add a win pip (small glowing circle) next to the winner's paper
+	if roundWinner and roundWinner > 0 then
+		local model = self.tableModel
+		if not model then return end
+
+		local pips = if roundWinner == 1 then self.p1Pips else self.p2Pips
+		local basePos = if roundWinner == 1 then self.pipBasePos1 else self.pipBasePos2
+		-- Cross direction: perpendicular to seat direction on the table surface
+		local dir = if roundWinner == 1 then self.pipDir1 else self.pipDir2
+		local cross = Vector3.new(dir.Z, 0, -dir.X) -- 90° rotation on horizontal plane
+
+		-- Place pips in a row along the cross axis, offset from the paper
+		local pipIndex = #pips
+		local spacing = 0.35
+		local totalWidth = (Constants.ROUNDS_TO_WIN - 1) * spacing
+		local startOffset = -totalWidth / 2
+		local pipPos = basePos + cross * (startOffset + pipIndex * spacing) + dir * 0.7
+
+		local pip = Instance.new("Part")
+		pip.Name = "WinPip"
+		pip.Shape = Enum.PartType.Cylinder
+		pip.Size = Vector3.new(0.05, 0.25, 0.25)
+		-- Orient cylinder to face up (rotate 90° on Z)
+		pip.CFrame = CFrame.new(pipPos) * CFrame.Angles(0, 0, math.rad(90))
+		pip.Anchored = true
+		pip.CanCollide = false
+		pip.Color = Color3.fromRGB(255, 215, 0)
+		pip.Material = Enum.Material.Neon
+		pip.Parent = model
+		table.insert(pips, pip)
+
+		-- Flash the winning paper briefly
+		local paper = if roundWinner == 1 then self.player1Paper else self.player2Paper
+		if paper then
+			task.spawn(function()
+				local originalColor = paper.Color
+				paper.Color = Color3.fromRGB(255, 215, 0)
+				paper.Material = Enum.Material.Neon
+				task.wait(0.5)
+				paper.Color = originalColor
+				paper.Material = Enum.Material.SmoothPlastic
+			end)
+		end
+	end
+end
+
+function MatchController:ResetPapers()
+	if self.player1Paper then
+		self.player1Paper.Color = Color3.fromRGB(255, 255, 255)
+	end
+	if self.player2Paper then
+		self.player2Paper.Color = Color3.fromRGB(255, 255, 255)
+	end
+end
+
+function MatchController:DestroyPapers()
+	if self.previewConnection then
+		self.previewConnection:Disconnect()
+		self.previewConnection = nil
+	end
+
+	if self.targetPaper then self.targetPaper:Destroy(); self.targetPaper = nil end
+	if self.player1Paper then self.player1Paper:Destroy(); self.player1Paper = nil end
+	if self.player2Paper then self.player2Paper:Destroy(); self.player2Paper = nil end
+
+	-- Restore the table's default billboard
+	if self.tableBillboard then
+		local playerCount = self.tableBillboard:FindFirstChild("PlayerCount")
+		local reward = self.tableBillboard:FindFirstChild("Reward")
+		if playerCount then playerCount.Visible = true end
+		if reward then reward.Visible = true end
+	end
+
+	-- Remove per-player score billboards
+	if self.p1Billboard then self.p1Billboard:Destroy(); self.p1Billboard = nil end
+	if self.p2Billboard then self.p2Billboard:Destroy(); self.p2Billboard = nil end
+	self.p1WinsLabel = nil
+	self.p2WinsLabel = nil
+
+	-- Clean up win pips
+	for _, pip in self.p1Pips do
+		pip:Destroy()
+	end
+	for _, pip in self.p2Pips do
+		pip:Destroy()
+	end
+	self.p1Pips = {}
+	self.p2Pips = {}
 end
 
 -- Cancel all pending threads (timeouts, delays)
@@ -63,6 +312,8 @@ function MatchController:ScheduleDelay(seconds: number, callback: () -> ())
 end
 
 function MatchController:Start()
+	self:CreatePapers()
+
 	getRemote("MatchStart"):FireClient(self.player1, {
 		opponentName = self.player2.DisplayName,
 		roundsToWin = Constants.ROUNDS_TO_WIN,
@@ -98,6 +349,9 @@ function MatchController:StartRound(waitForBegin: boolean?)
 	self.targetH = math.random()
 	self.targetS = math.random()
 	self.targetV = math.random()
+
+	self:ResetPapers()
+	self:UpdateTargetPaper()
 
 	local colorData = {
 		h = self.targetH,
@@ -271,6 +525,8 @@ function MatchController:ProcessRoundResult()
 		roundWinner = 2
 	end
 
+	self:UpdateScoreboard(roundWinner)
+
 	-- Include opponent's guess color and both player IDs for the reveal screen
 	local p1Guess = self.player1Guess or { h = 0, s = 0, v = 0 }
 	local p2Guess = self.player2Guess or { h = 0, s = 0, v = 0 }
@@ -433,6 +689,7 @@ end
 function MatchController:Cleanup()
 	self:DisconnectGuess()
 	self:CancelThreads()
+	self:DestroyPapers()
 	if self.beginConnection then
 		self.beginConnection:Disconnect()
 		self.beginConnection = nil

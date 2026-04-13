@@ -274,7 +274,7 @@ local function seatPlayer(tableId: string, player: Player)
 
 		local match = MatchController.new(p1, p2, function()
 			resetTable(tableId)
-		end)
+		end, tableState.model, tableState.billboard)
 
 		tableState.match = match
 		task.spawn(function()
