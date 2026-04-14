@@ -14,6 +14,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
+local UIManager = require(script.Parent:WaitForChild("UIManager"))
 
 local InventoryHud = {}
 
@@ -72,11 +73,11 @@ local function setupViewport(viewport: ViewportFrame, model: Model)
 	clone:PivotTo(CFrame.new(-boxCFrame.Position))
 
 	local maxExtent = math.max(boxSize.X, boxSize.Y, boxSize.Z)
-	local cameraDistance = maxExtent * 1.8 + 2
+	local cameraDistance = maxExtent * 1.4 + 0.5
 
 	local camera = Instance.new("Camera")
 	camera.CFrame = CFrame.lookAt(
-		Vector3.new(cameraDistance, cameraDistance * 0.7, cameraDistance),
+		Vector3.new(cameraDistance, cameraDistance * 0.6, cameraDistance),
 		Vector3.new(0, 0, 0)
 	)
 	camera.FieldOfView = 45
@@ -245,15 +246,17 @@ function InventoryHud.Start()
 	inventory.Visible = false
 	inventory.AnchorPoint = Vector2.new(0.5, 0.5)
 
-	-- Store the designer-placed position/size so tweens can target them.
+	-- Store the designer-placed position/size/transparency so tweens can target them.
 	local invOpenPos = inventory.Position
 	local invOpenSize = inventory.Size
+	local invOrigTransparency = inventory.BackgroundTransparency
 	local isAnimating = false
 
 	local function openInventory()
 		if inventory.Visible and not isAnimating then
 			return
 		end
+		UIManager.CloseOthers("Inventory")
 		isAnimating = true
 		inventory.Visible = true
 		-- Start small and transparent, then bounce in
@@ -261,10 +264,10 @@ function InventoryHud.Start()
 			invOpenSize.X.Scale * 0.7, invOpenSize.X.Offset * 0.7,
 			invOpenSize.Y.Scale * 0.7, invOpenSize.Y.Offset * 0.7
 		)
-		inventory.BackgroundTransparency = 0.6
+		inventory.BackgroundTransparency = math.min(invOrigTransparency + 0.3, 1)
 		TweenService:Create(inventory, BOUNCE_IN, {
 			Size = invOpenSize,
-			BackgroundTransparency = 0,
+			BackgroundTransparency = invOrigTransparency,
 		}):Play()
 		task.delay(BOUNCE_IN.Time, function()
 			isAnimating = false
@@ -282,13 +285,13 @@ function InventoryHud.Start()
 				invOpenSize.X.Scale * 0.7, invOpenSize.X.Offset * 0.7,
 				invOpenSize.Y.Scale * 0.7, invOpenSize.Y.Offset * 0.7
 			),
-			BackgroundTransparency = 0.6,
+			BackgroundTransparency = math.min(invOrigTransparency + 0.3, 1),
 		})
 		tween:Play()
 		tween.Completed:Connect(function()
 			inventory.Visible = false
 			inventory.Size = invOpenSize
-			inventory.BackgroundTransparency = 0
+			inventory.BackgroundTransparency = invOrigTransparency
 			isAnimating = false
 		end)
 	end
@@ -421,6 +424,11 @@ function InventoryHud.Start()
 			or input.UserInputType == Enum.UserInputType.Touch then
 			spawnRipple(input.Position.X, input.Position.Y)
 		end
+	end)
+
+	-- Register with UIManager so other panels can close us
+	UIManager.Register("Inventory", closeInventory, function()
+		return inventory.Visible
 	end)
 end
 

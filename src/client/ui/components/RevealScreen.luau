@@ -79,15 +79,13 @@ local function RoundDots(props: { roundOutcomes: { string }, maxRounds: number, 
 				ScaleType = Enum.ScaleType.Fit,
 			})
 		elseif outcome == "loss" then
-			children.X = e("TextLabel", {
-				Size = UDim2.fromScale(1, 1),
+			children.X = e("ImageLabel", {
+				Size = UDim2.fromScale(0.8, 0.8),
+				Position = UDim2.fromScale(0.5, 0.5),
+				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Text = "✕",
-				TextColor3 = Color3.fromRGB(255, 255, 255),
-				TextSize = 18,
-				Font = Enum.Font.FredokaOne,
-				TextXAlignment = Enum.TextXAlignment.Center,
-				TextYAlignment = Enum.TextYAlignment.Center,
+				Image = "rbxassetid://106881959484548",
+				ScaleType = Enum.ScaleType.Fit,
 			})
 		end
 
@@ -191,6 +189,7 @@ local function PlayerBar(props: {
 	dotsRevealed: boolean,
 	hsvText: string,
 	isWinner: boolean,
+	isLoser: boolean,
 	winnerGlow: number,
 	checkmarkScale: number,
 	xPosition: number,
@@ -211,20 +210,71 @@ local function PlayerBar(props: {
 	}, {
 		Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 
-		-- Gold winner glow
-		WinnerStroke = props.isWinner and e("UIStroke", {
-			Color = Color3.fromRGB(255, 215, 0),
-			Thickness = 3,
-			Transparency = 1 - props.winnerGlow,
+		-- Green "WIN" or red "LOSE" banner across the top of the bar.
+		-- Fades in with winnerGlow (t=2.5s) so scores are visible first.
+		WinBanner = props.isWinner and e("Frame", {
+			Size = UDim2.new(1, 0, 0, 44),
+			Position = UDim2.fromOffset(0, 0),
+			BackgroundColor3 = Color3.fromRGB(40, 200, 60),
+			BackgroundTransparency = if props.checkmarkScale > 0 then 0 else 1,
+			BorderSizePixel = 0,
+			ZIndex = 3,
+		}, {
+			BannerCorner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+			BannerText = e("TextLabel", {
+				Size = UDim2.fromScale(1, 1),
+				BackgroundTransparency = 1,
+				Text = "WIN",
+				TextColor3 = Color3.fromRGB(255, 255, 255),
+				TextTransparency = if props.checkmarkScale > 0 then 0 else 1,
+				TextSize = 28,
+				Font = Enum.Font.FredokaOne,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextYAlignment = Enum.TextYAlignment.Center,
+			}, {
+				BannerStroke = e("UIStroke", {
+					Color = Color3.fromRGB(0, 0, 0),
+					Thickness = 2,
+					Transparency = if props.checkmarkScale > 0 then 0 else 1,
+				}),
+			}),
+		}),
+
+		LoseBanner = props.isLoser and e("Frame", {
+			Size = UDim2.new(1, 0, 0, 44),
+			Position = UDim2.fromOffset(0, 0),
+			BackgroundColor3 = Color3.fromRGB(200, 50, 50),
+			BackgroundTransparency = if props.checkmarkScale > 0 then 0 else 1,
+			BorderSizePixel = 0,
+			ZIndex = 3,
+		}, {
+			BannerCorner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+			BannerText = e("TextLabel", {
+				Size = UDim2.fromScale(1, 1),
+				BackgroundTransparency = 1,
+				Text = "LOSE",
+				TextColor3 = Color3.fromRGB(255, 255, 255),
+				TextTransparency = if props.checkmarkScale > 0 then 0 else 1,
+				TextSize = 28,
+				Font = Enum.Font.FredokaOne,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextYAlignment = Enum.TextYAlignment.Center,
+			}, {
+				BannerStroke = e("UIStroke", {
+					Color = Color3.fromRGB(0, 0, 0),
+					Thickness = 2,
+					Transparency = if props.checkmarkScale > 0 then 0 else 1,
+				}),
+			}),
 		}),
 
 		-- Content container anchored to bottom of bar
-		Content = e("Frame", {
-			Size = UDim2.new(1, 0, 0, 560),
-			Position = UDim2.new(0, 0, 1, 0),
-			AnchorPoint = Vector2.new(0, 1),
-			BackgroundTransparency = 1,
-		}, {
+			Content = e("Frame", {
+				Size = UDim2.new(1, 0, 0, 560),
+				Position = UDim2.new(0, 0, 1, 0),
+				AnchorPoint = Vector2.new(0, 1),
+				BackgroundTransparency = 1,
+			}, {
 			Layout = e("UIListLayout", {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -241,11 +291,24 @@ local function PlayerBar(props: {
 			-- Green checkmark (only for round winner)
 			Checkmark = props.isWinner and e("ImageLabel", {
 				Size = UDim2.fromOffset(
-					math.floor(96 * math.clamp(props.checkmarkScale, 0, 1.2)),
-					math.floor(96 * math.clamp(props.checkmarkScale, 0, 1.2))
+					math.floor(120 * math.clamp(props.checkmarkScale, 0, 1.2)),
+					math.floor(120 * math.clamp(props.checkmarkScale, 0, 1.2))
 				),
 				BackgroundTransparency = 1,
 				Image = "rbxassetid://121564337913131",
+				ImageTransparency = textAlpha,
+				ScaleType = Enum.ScaleType.Fit,
+				LayoutOrder = 0,
+			}),
+
+			-- Red X (only for round loser)
+			LoseX = props.isLoser and e("ImageLabel", {
+				Size = UDim2.fromOffset(
+					math.floor(100 * math.clamp(props.checkmarkScale, 0, 1.2)),
+					math.floor(100 * math.clamp(props.checkmarkScale, 0, 1.2))
+				),
+				BackgroundTransparency = 1,
+				Image = "rbxassetid://106881959484548",
 				ImageTransparency = textAlpha,
 				ScaleType = Enum.ScaleType.Fit,
 				LayoutOrder = 0,
@@ -394,7 +457,7 @@ local function RevealScreen(props: RevealScreenProps)
 					setAnimatedScore(math.floor(scoreEased * props.score * 100 + 0.5) / 100)
 					setAnimatedOppScore(math.floor(scoreEased * (props.opponentScore or 0) * 100 + 0.5) / 100)
 
-					-- Winner glow
+					-- Winner glow (drives banner fade-in)
 					local gt = math.clamp((elapsed - GLOW_START) / GLOW_DUR, 0, 1)
 					setWinnerGlow(gt)
 
@@ -505,6 +568,7 @@ local function RevealScreen(props: RevealScreenProps)
 				dotsRevealed = dotsRevealed,
 				hsvText = guessHSV,
 				isWinner = myWon and not isTie,
+				isLoser = not myWon and not isTie,
 				winnerGlow = winnerGlow,
 				checkmarkScale = checkmarkScale,
 				xPosition = 0,
@@ -588,6 +652,7 @@ local function RevealScreen(props: RevealScreenProps)
 				dotsRevealed = dotsRevealed,
 				hsvText = oppHSV,
 				isWinner = not myWon and not isTie,
+				isLoser = myWon and not isTie,
 				winnerGlow = winnerGlow,
 				checkmarkScale = checkmarkScale,
 				xPosition = 512,

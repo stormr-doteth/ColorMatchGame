@@ -192,15 +192,13 @@ local function HeaderDots(props: { roundOutcomes: { string }, LayoutOrder: numbe
 				ScaleType = Enum.ScaleType.Fit,
 			})
 		elseif outcome == "loss" then
-			children.X = e("TextLabel", {
-				Size = UDim2.fromScale(1, 1),
+			children.X = e("ImageLabel", {
+				Size = UDim2.fromScale(0.8, 0.8),
+				Position = UDim2.fromScale(0.5, 0.5),
+				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Text = "✕",
-				TextColor3 = Color3.fromRGB(255, 255, 255),
-				TextSize = 22,
-				Font = Enum.Font.FredokaOne,
-				TextXAlignment = Enum.TextXAlignment.Center,
-				TextYAlignment = Enum.TextYAlignment.Center,
+				Image = "rbxassetid://106881959484548",
+				ScaleType = Enum.ScaleType.Fit,
 			})
 		end
 		dots["Dot" .. i] = e("Frame", {

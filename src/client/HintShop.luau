@@ -4,6 +4,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
+local NotificationHud = require(script.Parent:WaitForChild("NotificationHud"))
 
 local MIN_GUESS_TIME_TO_USE = 3 -- seconds remaining required to use a hint during guessing
 
@@ -81,6 +82,7 @@ function HintShop.Start()
 			matchColorCount -= 1
 			localPlayer:SetAttribute("MatchColorActive", true)
 			updateItem2Text()
+			NotificationHud.Show("Match Color activated!")
 		else
 			MarketplaceService:PromptProductPurchase(localPlayer, Constants.MATCH_COLOR_PRODUCT_ID)
 		end
@@ -98,6 +100,7 @@ function HintShop.Start()
 			hintCount -= 1
 			localPlayer:SetAttribute("HintActive", true)
 			updateButtonText()
+			NotificationHud.Show("Hint activated!")
 		else
 			-- Purchase a hint
 			MarketplaceService:PromptProductPurchase(localPlayer, Constants.HINT_PRODUCT_ID)
@@ -266,11 +269,13 @@ function HintShop.Start()
 	table.insert(connections, remotes:WaitForChild("HintActivated").OnClientEvent:Connect(function()
 		hintCount += 1
 		updateButtonText()
+		NotificationHud.Show("Hint purchased!")
 	end))
 
 	table.insert(connections, remotes:WaitForChild("MatchColorActivated").OnClientEvent:Connect(function()
 		matchColorCount += 1
 		updateItem2Text()
+		NotificationHud.Show("Match Color purchased!")
 	end))
 
 	resolveGui()

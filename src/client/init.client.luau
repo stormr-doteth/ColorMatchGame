@@ -13,6 +13,8 @@ local StreakHud = require(script:WaitForChild("StreakHud"))
 local InventoryHud = require(script:WaitForChild("InventoryHud"))
 local NotificationHud = require(script:WaitForChild("NotificationHud"))
 local HintShop = require(script:WaitForChild("HintShop"))
+local LuckyBlockClient = require(script:WaitForChild("LuckyBlockClient"))
+local LuckyBlockShopUI = require(script:WaitForChild("LuckyBlockShopUI"))
 local App = require(script:WaitForChild("ui"):WaitForChild("App"))
 
 local localPlayer = Players.LocalPlayer
@@ -25,6 +27,8 @@ StreakHud.Start()
 InventoryHud.Start()
 NotificationHud.Start()
 HintShop.Start()
+LuckyBlockClient.Start()
+LuckyBlockShopUI.Start()
 
 -- Listen for server-sent notifications (e.g. purchase confirmations).
 local remotes = ReplicatedStorage:WaitForChild("Remotes")

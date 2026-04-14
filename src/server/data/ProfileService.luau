@@ -13,6 +13,7 @@ local PROFILE_TEMPLATE = {
 	WinStreak = 0,
 	Chairs = {} :: { string }, -- array of owned chair ids
 	EquippedChair = "", -- "" means none equipped
+	LuckyBlocks = {} :: { [string]: number }, -- blockId -> count of unopened blocks
 }
 
 local PlayerStore = ProfileStore.New("PlayerData", PROFILE_TEMPLATE)
@@ -205,6 +206,34 @@ function ProfileService.SetEquippedChair(player, chairId: string): boolean
 		return true
 	end
 	profile.Data.EquippedChair = chairId
+	notify(player)
+	return true
+end
+
+function ProfileService.AddLuckyBlock(player, blockId: string)
+	local profile = activeProfiles[player]
+	if profile then
+		local blocks = profile.Data.LuckyBlocks
+		blocks[blockId] = (blocks[blockId] or 0) + 1
+		notify(player)
+	end
+end
+
+-- Decrements the count of a lucky block type. Returns true if successful.
+function ProfileService.UseLuckyBlock(player, blockId: string): boolean
+	local profile = activeProfiles[player]
+	if not profile then
+		return false
+	end
+	local blocks = profile.Data.LuckyBlocks
+	local count = blocks[blockId] or 0
+	if count <= 0 then
+		return false
+	end
+	blocks[blockId] = count - 1
+	if blocks[blockId] == 0 then
+		blocks[blockId] = nil
+	end
 	notify(player)
 	return true
 end

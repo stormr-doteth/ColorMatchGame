@@ -20,6 +20,18 @@ local ChairCatalog: { ChairEntry } = {
 	{ id = "yellow_chair", displayName = "Yellow Chair", price = 250, modelName = "YellowChair" },
 	{ id = "blue_chair",   displayName = "Blue Chair",   price = 500, modelName = "BlueChair"   },
 
+	-- Mythic tier (lucky block exclusive)
+	{ id = "crystal_chair",  displayName = "Crystal Chair",  price = 0, modelName = "CrystalChair"  },
+	{ id = "flame_chair",    displayName = "Flame Chair",    price = 0, modelName = "FlameChair"    },
+	{ id = "shadow_chair",   displayName = "Shadow Chair",   price = 0, modelName = "ShadowChair"   },
+	{ id = "galaxy_chair",   displayName = "Galaxy Chair",   price = 0, modelName = "GalaxyChair"   },
+
+	-- Brainrot God tier (lucky block exclusive)
+	{ id = "diamond_chair",    displayName = "Diamond Chair",    price = 0, modelName = "DiamondChair"    },
+	{ id = "lava_chair",       displayName = "Lava Chair",       price = 0, modelName = "LavaChair"       },
+	{ id = "rainbow_chair",    displayName = "Rainbow Chair",    price = 0, modelName = "RainbowChair"    },
+	{ id = "brainrot_throne",  displayName = "Brainrot Throne",  price = 0, modelName = "BrainrotThrone"  },
+
 	-- TODO: remove after testing — 25 randomized $1 chairs for UI stress test
 	{ id = "crimson_chair",  displayName = "Crimson Chair",  price = 1, modelName = "CrimsonChair"  },
 	{ id = "azure_chair",    displayName = "Azure Chair",    price = 1, modelName = "AzureChair"    },

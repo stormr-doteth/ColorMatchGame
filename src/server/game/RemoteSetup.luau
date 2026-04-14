@@ -19,6 +19,10 @@ local REMOTE_NAMES = {
 	"HintActivated",
 	"MatchColorActivated",
 	"GuessPreview",
+	"PurchaseLuckyBlock",
+	"OpenLuckyBlock",
+	"LuckyBlockResult",
+	"OpenLuckyBlockShop",
 }
 
 local RemoteSetup = {}
