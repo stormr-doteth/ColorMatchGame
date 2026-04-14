@@ -403,6 +403,84 @@ function LuckyBlockShopUI.Start()
 	end
 
 	UIManager.Register("Shop", LuckyBlockShopUI.Close, LuckyBlockShopUI.IsOpen)
+
+	-- CosmeticsShop: wire up CosmeticsButton to toggle CosmeticsShop frame
+	local cosmeticsShop = screenGui:FindFirstChild("CosmeticsShop") :: Frame?
+	if cosmeticsShop then
+		cosmeticsShop:SetAttribute("OrigSize", cosmeticsShop.Size)
+		cosmeticsShop.Visible = false
+
+		local cosmeticsVisible = false
+		local cosmeticsAnimating = false
+
+		local function openCosmetics()
+			if cosmeticsVisible or cosmeticsAnimating then return end
+			UIManager.CloseOthers("Cosmetics")
+			cosmeticsAnimating = true
+			cosmeticsShop.AnchorPoint = Vector2.new(0.5, 0.5)
+			local targetSize = cosmeticsShop:GetAttribute("OrigSize") or cosmeticsShop.Size
+			cosmeticsShop.Size = UDim2.new(
+				targetSize.X.Scale * 0.7, targetSize.X.Offset * 0.7,
+				targetSize.Y.Scale * 0.7, targetSize.Y.Offset * 0.7
+			)
+			cosmeticsShop.Visible = true
+			TweenService:Create(cosmeticsShop, BOUNCE_IN, { Size = targetSize }):Play()
+			cosmeticsVisible = true
+			task.delay(BOUNCE_IN.Time, function() cosmeticsAnimating = false end)
+		end
+
+		local function closeCosmetics()
+			if not cosmeticsVisible or cosmeticsAnimating then return end
+			cosmeticsAnimating = true
+			local targetSize = cosmeticsShop:GetAttribute("OrigSize") or cosmeticsShop.Size
+			local shrunkSize = UDim2.new(
+				targetSize.X.Scale * 0.7, targetSize.X.Offset * 0.7,
+				targetSize.Y.Scale * 0.7, targetSize.Y.Offset * 0.7
+			)
+			local tween = TweenService:Create(cosmeticsShop, BOUNCE_OUT, { Size = shrunkSize })
+			tween:Play()
+			tween.Completed:Connect(function()
+				cosmeticsShop.Visible = false
+				cosmeticsShop.Size = targetSize
+				cosmeticsVisible = false
+				cosmeticsAnimating = false
+			end)
+		end
+
+		local function toggleCosmetics()
+			if cosmeticsVisible then closeCosmetics() else openCosmetics() end
+		end
+
+		UIManager.Register("Cosmetics", closeCosmetics, function() return cosmeticsVisible end)
+
+		-- Hook up CosmeticsButton
+		if shopButtons then
+			local cosmBtn = shopButtons:FindFirstChild("CosmeticsButton")
+			if cosmBtn then
+				local overlay = cosmBtn:FindFirstChild("CosmeticsClickOverlay")
+				if not overlay then
+					overlay = Instance.new("TextButton")
+					overlay.Name = "CosmeticsClickOverlay"
+					overlay.Size = UDim2.fromScale(1, 1)
+					overlay.BackgroundTransparency = 1
+					overlay.Text = ""
+					overlay.ZIndex = 10
+					overlay.Parent = cosmBtn
+				end
+				local btn = overlay :: TextButton
+				btn.Activated:Connect(toggleCosmetics)
+			end
+		end
+
+		-- Close button inside CosmeticsShop
+		local cosHeader = cosmeticsShop:FindFirstChild("Header") :: Frame?
+		if cosHeader then
+			local closeBtn = cosHeader:FindFirstChild("CloseButton")
+			if closeBtn and closeBtn:IsA("GuiButton") then
+				closeBtn.Activated:Connect(closeCosmetics)
+			end
+		end
+	end
 end
 
 return LuckyBlockShopUI
