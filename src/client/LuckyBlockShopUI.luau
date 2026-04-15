@@ -154,17 +154,32 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 end
 
 ---------------------------------------------------------------------------
--- Wire up a gamepass card (manually designed frame)
+-- Wire a dev product card (cash or wins) — finds SubmitButton inside
 ---------------------------------------------------------------------------
 
-local function wirePassCard(card: Frame, pass)
+local function wireDevProductCard(card: Instance, product)
 	local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
 	if not submitFrame then return end
-
 	local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 	if not submitBtn then return end
 
-	submitBtn.Text = ROBUX_ICON .. " " .. tostring(pass.robuxPrice)
+	submitBtn.Activated:Connect(function()
+		popButton(submitFrame)
+		if product.productId > 0 then
+			MarketplaceService:PromptProductPurchase(localPlayer, product.productId)
+		end
+	end)
+end
+
+---------------------------------------------------------------------------
+-- Wire a gamepass card — finds SubmitButton inside, checks ownership
+---------------------------------------------------------------------------
+
+local function wireGamePassCard(card: Instance, pass)
+	local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
+	if not submitFrame then return end
+	local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
+	if not submitBtn then return end
 
 	submitBtn.Activated:Connect(function()
 		popButton(submitFrame)
@@ -173,7 +188,6 @@ local function wirePassCard(card: Frame, pass)
 		end
 	end)
 
-	-- Check ownership
 	if pass.gamePassId > 0 then
 		task.spawn(function()
 			local ok, owned = pcall(function()
@@ -184,27 +198,6 @@ local function wirePassCard(card: Frame, pass)
 			end
 		end)
 	end
-end
-
----------------------------------------------------------------------------
--- Wire up a coin pack card (manually designed frame)
----------------------------------------------------------------------------
-
-local function wireCoinCard(card: Frame, pack)
-	local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
-	if not submitFrame then return end
-
-	local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
-	if not submitBtn then return end
-
-	submitBtn.Text = ROBUX_ICON .. " " .. tostring(pack.robuxPrice)
-
-	submitBtn.Activated:Connect(function()
-		popButton(submitFrame)
-		if pack.productId > 0 then
-			MarketplaceService:PromptProductPurchase(localPlayer, pack.productId)
-		end
-	end)
 end
 
 ---------------------------------------------------------------------------
@@ -221,57 +214,85 @@ local function buildShop(shopFrame: Frame)
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local purchaseRemote = remotes:WaitForChild("PurchaseLuckyBlock") :: RemoteEvent
 
-	-- Lucky Blocks: find Item template, clone per catalog entry
-	local template: Frame? = nil
-	local existingItems: { Frame } = {}
-	for _, child in body:GetChildren() do
-		if child:IsA("Frame") and child.Name:match("^Item%d") then
-			table.insert(existingItems, child)
-			if not template then
-				template = child
-			end
-		end
-	end
-
-	for _, item in existingItems do
-		item.Visible = false
-	end
-
-	if template then
-		for idx, entry in LuckyBlockCatalog.GetAll() do
-			local card = template:Clone()
-			card.Name = "LuckyBlock_" .. entry.id
-			card.Visible = true
-			card.LayoutOrder = idx
-			card.Parent = body
+	-- Lucky Blocks: wire existing manually-designed cards (named LuckyBlock_{id})
+	for _, entry in LuckyBlockCatalog.GetAll() do
+		if entry.shopType == "cosmetics" then continue end
+		local card = body:FindFirstChild("LuckyBlock_" .. entry.id) :: Frame?
+		if card then
 			wireBlockCard(card, entry, purchaseRemote)
 		end
 	end
 
-	-- Game Passes: wire existing frames
-	local gamePassesFrame = body:FindFirstChild("GamePasses") :: Frame?
-	if gamePassesFrame then
-		for _, pass in ShopCatalog.GetGamePasses() do
-			local frameName = pass.frameName
-			if not frameName then continue end
-			local card = gamePassesFrame:FindFirstChild(frameName) :: Frame?
-			if card then
-				wirePassCard(card, pass)
+	-- Dev Products: wire cards by matching ItemLabel.Text to catalog displayName
+	-- Searches inside DevProducts, DevProducts_Wins, and top-level frames (BigCash, BigWins)
+	local devProductsByName: { [string]: any } = {}
+	for _, product in ShopCatalog.GetDevProducts() do
+		devProductsByName[product.displayName] = product
+	end
+
+	local function wireDevProductsInContainer(container: Instance)
+		for _, card in container:GetChildren() do
+			if not card:IsA("GuiObject") then continue end
+			-- Check ItemLabel or VIP_Label for the display name
+			local label = card:FindFirstChild("ItemLabel") or card:FindFirstChild("VIP_Label")
+			if label and label:IsA("TextLabel") then
+				local product = devProductsByName[label.Text]
+				if product then
+					wireDevProductCard(card, product)
+				end
 			end
 		end
 	end
 
-	-- Coin Packs: wire existing frames (look for CoinPacks frame or individual cards)
-	local coinPacksFrame = body:FindFirstChild("CoinPacks") :: Frame?
-	if coinPacksFrame then
-		for _, pack in ShopCatalog.GetCoinPacks() do
-			local frameName = pack.frameName
-			if not frameName then continue end
-			local card = coinPacksFrame:FindFirstChild(frameName) :: Frame?
-			if card then
-				wireCoinCard(card, pack)
+	local devProducts = body:FindFirstChild("DevProducts")
+	if devProducts then wireDevProductsInContainer(devProducts) end
+
+	local devWins = body:FindFirstChild("DevProducts_Wins")
+	if devWins then wireDevProductsInContainer(devWins) end
+
+	-- BigCash and BigWins are top-level frames in Body
+	local bigCash = body:FindFirstChild("BigCash")
+	if bigCash then
+		local label = bigCash:FindFirstChild("VIP_Label")
+		if label and label:IsA("TextLabel") then
+			local product = devProductsByName[label.Text]
+			if product then wireDevProductCard(bigCash, product) end
+		end
+	end
+
+	local bigWins = body:FindFirstChild("BigWins")
+	if bigWins then
+		local label = bigWins:FindFirstChild("VIP_Label")
+		if label and label:IsA("TextLabel") then
+			local product = devProductsByName[label.Text]
+			if product then wireDevProductCard(bigWins, product) end
+		end
+	end
+
+	-- Game Passes: wire by matching ItemLabel.Text to catalog displayName
+	-- Passes live in GamePasses frame + VIP frame at top level
+	local gamePassesByName: { [string]: any } = {}
+	for _, pass in ShopCatalog.GetGamePasses() do
+		gamePassesByName[pass.displayName] = pass
+	end
+
+	local gamePassesFrame = body:FindFirstChild("GamePasses") :: Frame?
+	if gamePassesFrame then
+		for _, card in gamePassesFrame:GetChildren() do
+			if not card:IsA("GuiObject") then continue end
+			local label = card:FindFirstChild("ItemLabel")
+			if label and label:IsA("TextLabel") then
+				local pass = gamePassesByName[label.Text]
+				if pass then wireGamePassCard(card, pass) end
 			end
 		end
+	end
+
+	-- VIP card is a top-level frame
+	local vipCard = body:FindFirstChild("VIP")
+	if vipCard then
+		local pass = gamePassesByName["VIP"]
+		if pass then wireGamePassCard(vipCard, pass) end
 	end
 
 	-- Close button
@@ -404,11 +425,132 @@ function LuckyBlockShopUI.Start()
 
 	UIManager.Register("Shop", LuckyBlockShopUI.Close, LuckyBlockShopUI.IsOpen)
 
-	-- CosmeticsShop: wire up CosmeticsButton to toggle CosmeticsShop frame
+	-- CosmeticsShop: wire up cards and buttons
 	local cosmeticsShop = screenGui:FindFirstChild("CosmeticsShop") :: Frame?
 	if cosmeticsShop then
 		cosmeticsShop:SetAttribute("OrigSize", cosmeticsShop.Size)
 		cosmeticsShop.Visible = false
+
+		local cosBody = cosmeticsShop:FindFirstChild("Body") :: ScrollingFrame?
+		if cosBody then
+			local cosRemotes = ReplicatedStorage:WaitForChild("Remotes")
+			local cosPurchaseRemote = cosRemotes:WaitForChild("PurchaseLuckyBlock") :: RemoteEvent
+
+			-- Build lookup: displayName -> catalog entry for cosmetics blocks
+			local cosmeticsByName: { [string]: any } = {}
+			for _, entry in LuckyBlockCatalog.GetAll() do
+				if entry.shopType == "cosmetics" then
+					cosmeticsByName[entry.displayName] = entry
+				end
+			end
+
+			-- Wire each manually-designed card by matching its ItemLabel text
+			for _, card in cosBody:GetChildren() do
+				if not card:IsA("Frame") then continue end
+
+				local itemLabel = card:FindFirstChild("ItemLabel") :: TextLabel?
+				if not itemLabel then continue end
+
+				local entry = cosmeticsByName[itemLabel.Text]
+				if not entry then continue end
+
+				local cashPrice = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
+				local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
+
+				-- Wire RobuxButtons (cash + Robux)
+				for _, child in card:GetChildren() do
+					if child:IsA("TextButton") and child.Name == "RobuxButton" then
+						local rl = child:FindFirstChild("robuxLabel") :: TextLabel?
+						if not rl then continue end
+
+						if rl.Text:match("%$") then
+							-- Cash buy button
+							rl.Text = "$" .. tostring(cashPrice)
+							child.Activated:Connect(function()
+								popButton(child)
+								cosPurchaseRemote:FireServer(entry.id, qty)
+							end)
+						else
+							-- Robux buy button (price text set in UI)
+							child.Activated:Connect(function()
+								popButton(child)
+								local productId = entry.robuxProductId or 0
+								if productId > 0 then
+									MarketplaceService:PromptProductPurchase(localPlayer, productId)
+								end
+							end)
+						end
+					end
+				end
+
+				-- Wire SubmitButton if present (alternative button pattern)
+				local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
+				if submitFrame then
+					local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
+					if submitBtn then
+						submitBtn.Text = "$" .. tostring(cashPrice)
+						submitBtn.Activated:Connect(function()
+							popButton(submitFrame)
+							cosPurchaseRemote:FireServer(entry.id, qty)
+						end)
+					end
+				end
+
+				-- Wire item slots (% labels, chair names, ViewportFrames)
+				local chairTemplates = ReplicatedStorage:FindFirstChild("ChairTemplates")
+				local chances = LuckyBlockCatalog.GetChances(entry.id)
+				local possibleItems = card:FindFirstChild("PossibleItems") :: Frame?
+				if possibleItems then
+					local slots: { ImageButton } = {}
+					for _, child in possibleItems:GetChildren() do
+						if child:IsA("ImageButton") then
+							table.insert(slots, child)
+						end
+					end
+
+					local sortedLoot = table.clone(entry.lootTable)
+					table.sort(sortedLoot, function(a, b) return a.weight > b.weight end)
+
+					for i, slot in slots do
+						local loot = sortedLoot[i]
+						if not loot then
+							slot.Visible = false
+							continue
+						end
+
+						local chairEntry = ChairCatalog.Get(loot.chairId)
+						local pct = chances[loot.chairId] or 0
+
+						local rarityLabel = slot:FindFirstChild("RarityLabel") :: TextLabel?
+						if rarityLabel then
+							rarityLabel.Text = `{pct}%`
+						end
+
+						local nameLabel = slot:FindFirstChild("ItemNameLabel") :: TextLabel?
+						if nameLabel and chairEntry then
+							nameLabel.Text = chairEntry.displayName
+						end
+
+						local slotImage = slot:FindFirstChild("ItemImage") :: ImageLabel?
+						if slotImage and chairEntry and chairTemplates then
+							local template = chairTemplates:FindFirstChild(chairEntry.modelName)
+							if template and template:IsA("Model") then
+								local vf = Instance.new("ViewportFrame")
+								vf.Name = "ItemViewport"
+								vf.Size = slotImage.Size
+								vf.Position = slotImage.Position
+								vf.AnchorPoint = slotImage.AnchorPoint
+								vf.BackgroundTransparency = 1
+								vf.ZIndex = slotImage.ZIndex
+								vf.Parent = slot
+								setupViewport(vf, template)
+								slotImage.Visible = false
+							end
+						end
+					end
+				end
+			end
+		end
 
 		local cosmeticsVisible = false
 		local cosmeticsAnimating = false
@@ -479,6 +621,15 @@ function LuckyBlockShopUI.Start()
 			if closeBtn and closeBtn:IsA("GuiButton") then
 				closeBtn.Activated:Connect(closeCosmetics)
 			end
+		end
+
+		-- Listen for server telling us to open the cosmetics shop (from ProximityPrompt)
+		local openCosRemote = remotes:WaitForChild("OpenCosmeticsShop", 5)
+		if openCosRemote then
+			local remote = openCosRemote :: RemoteEvent
+			remote.OnClientEvent:Connect(function()
+				openCosmetics()
+			end)
 		end
 	end
 end

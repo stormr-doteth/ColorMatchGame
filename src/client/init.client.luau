@@ -15,6 +15,7 @@ local NotificationHud = require(script:WaitForChild("NotificationHud"))
 local HintShop = require(script:WaitForChild("HintShop"))
 local LuckyBlockClient = require(script:WaitForChild("LuckyBlockClient"))
 local LuckyBlockShopUI = require(script:WaitForChild("LuckyBlockShopUI"))
+local GamepassSpamRotator = require(script:WaitForChild("GamepassSpamRotator"))
 local App = require(script:WaitForChild("ui"):WaitForChild("App"))
 
 local localPlayer = Players.LocalPlayer
@@ -29,6 +30,7 @@ NotificationHud.Start()
 HintShop.Start()
 LuckyBlockClient.Start()
 LuckyBlockShopUI.Start()
+GamepassSpamRotator.Start()
 
 -- Listen for server-sent notifications (e.g. purchase confirmations).
 local remotes = ReplicatedStorage:WaitForChild("Remotes")

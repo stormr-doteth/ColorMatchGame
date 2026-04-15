@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local ShopCatalog = require(Shared:WaitForChild("ShopCatalog"))
+local LuckyBlockCatalog = require(Shared:WaitForChild("LuckyBlockCatalog"))
 
 local ProfileService = require(script:WaitForChild("data"):WaitForChild("ProfileService"))
 local RemoteSetup = require(script:WaitForChild("game"):WaitForChild("RemoteSetup"))
@@ -32,12 +33,31 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	elseif receiptInfo.ProductId == Constants.MATCH_COLOR_PRODUCT_ID then
 		RemoteSetup.Get("MatchColorActivated"):FireClient(player)
 	else
-		-- Check if it's a coin pack purchase
-		for _, pack in ShopCatalog.GetCoinPacks() do
-			if receiptInfo.ProductId == pack.productId then
-				ProfileService.AddCash(player, pack.coins)
-				RemoteSetup.Get("ShowNotification"):FireClient(player, `+${pack.coins} Coins!`)
-				break
+		local handled = false
+
+		-- Check if it's a dev product (cash or wins)
+		local product = ShopCatalog.GetDevProductByProductId(receiptInfo.ProductId)
+		if product then
+			if product.category == "cash" then
+				ProfileService.AddCash(player, product.amount)
+				RemoteSetup.Get("ShowNotification"):FireClient(player, `+${product.amount} Cash!`)
+			elseif product.category == "wins" then
+				ProfileService.AddWins(player, product.amount)
+				RemoteSetup.Get("ShowNotification"):FireClient(player, `+{product.amount} Wins!`)
+			end
+			handled = true
+		end
+
+		-- Check if it's a lucky block Robux purchase
+		if not handled then
+			for _, entry in LuckyBlockCatalog.GetAll() do
+				if entry.robuxProductId and entry.robuxProductId == receiptInfo.ProductId then
+					ProfileService.AddLuckyBlock(player, entry.id)
+					LuckyBlockShop.GrantTool(player, entry.id)
+					RemoteSetup.Get("ShowNotification"):FireClient(player, `Purchased {entry.displayName}!`)
+					handled = true
+					break
+				end
 			end
 		end
 	end

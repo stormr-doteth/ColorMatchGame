@@ -25,7 +25,7 @@ local NotificationHud = require(script.Parent:WaitForChild("NotificationHud"))
 local LuckyBlockClient = {}
 
 local localPlayer = Players.LocalPlayer
-local isOpening = false -- debounce
+local activeOpenings: { [string]: boolean } = {} -- per-player debounce
 
 -- Timing constants
 local DROP_TIME = Constants.LUCKY_BLOCK_DROP_TIME
@@ -380,14 +380,18 @@ end
 
 local function playRevealAnimation(data)
 	local blockId = data.blockId
+	local playerName: string = data.playerName or ""
 	local winnerChairId = data.winnerChairId
 	local lootChairIds = data.lootChairIds
 	local dropPosition: Vector3 = data.dropPosition
 	local notificationMsg: string? = data.notificationMsg
+	local isLocalPlayer = (playerName == localPlayer.Name)
 
 	local entry = LuckyBlockCatalog.Get(blockId)
 	if not entry then
-		isOpening = false
+		if isLocalPlayer then
+			activeOpenings[playerName] = nil
+		end
 		return
 	end
 
@@ -672,44 +676,71 @@ local function playRevealAnimation(data)
 	local shimmer = makeSound(soundAnchor, Constants.SFX_SHIMMER, 0.4, true)
 	shimmer:Play()
 
-	-- Show notification NOW (after reveal animation)
-	if notificationMsg then
+	-- Show notification only for the player who opened the block
+	if notificationMsg and isLocalPlayer then
 		NotificationHud.Show(notificationMsg)
 	end
 
 	-----------------------------------------------------------------------
-	-- Phase 6: Display + Cleanup (3.0s)
+	-- Phase 6: Display, tween chair into player, cleanup
 	-----------------------------------------------------------------------
 	task.wait(DISPLAY_TIME)
 
 	-- Fade out shimmer
 	TweenService:Create(shimmer, TweenInfo.new(0.5), { Volume = 0 }):Play()
-	task.wait(0.5)
 
-	-- Fade out the winner
+	-- Stop spinning
+	if spinConnection then
+		spinConnection:Disconnect()
+		spinConnection = nil
+	end
+
+	-- Tween the winner chair into the opening player's torso
 	if winnerModel then
-		local fadeStart = os.clock()
-		local fadeDuration = 0.5
-		local fadeBaseScale = winnerModel:GetScale()
-		while os.clock() - fadeStart < fadeDuration do
-			local t = (os.clock() - fadeStart) / fadeDuration
-			setModelTransparency(winnerModel, t)
-			winnerModel:ScaleTo(lerp(fadeBaseScale, 0.01, t))
+		local openerPlayer = Players:FindFirstChild(playerName)
+		local targetPos = chairPos -- fallback if player left
+		if openerPlayer and openerPlayer:IsA("Player") and openerPlayer.Character then
+			local hrp = openerPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") then
+				targetPos = hrp.Position
+			end
+		end
+
+		local flyDuration = 0.8
+		local flyStart = os.clock()
+		local startPivot = winnerModel:GetPivot()
+		local startScale = winnerModel:GetScale()
+		while os.clock() - flyStart < flyDuration do
+			local t = (os.clock() - flyStart) / flyDuration
+			-- Quad ease in: accelerating "sucked in" feel
+			local eased = t * t
+
+			-- Update target in case player is moving
+			if openerPlayer and openerPlayer:IsA("Player") and openerPlayer.Character then
+				local hrp = openerPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if hrp and hrp:IsA("BasePart") then
+					targetPos = hrp.Position
+				end
+			end
+
+			local pos = startPivot.Position:Lerp(targetPos, eased)
+			winnerModel:PivotTo(CFrame.new(pos) * CFrame.Angles(0, eased * math.pi * 2, 0))
+			winnerModel:ScaleTo(lerp(startScale, startScale * 0.2, eased))
+			setModelTransparency(winnerModel, eased)
 			task.wait()
 		end
 	end
 
 	-- Cleanup
-	if spinConnection then
-		spinConnection:Disconnect()
-	end
 	for _, clone in chairClones do
 		clone:Destroy()
 	end
 	sparkleEmitter:Destroy()
 	soundAnchor:Destroy()
 
-	isOpening = false
+	if isLocalPlayer then
+		activeOpenings[playerName] = nil
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -717,7 +748,7 @@ end
 ---------------------------------------------------------------------------
 
 local function onToolActivated(tool: Tool)
-	if isOpening then
+	if activeOpenings[localPlayer.Name] then
 		return
 	end
 
@@ -737,7 +768,7 @@ local function onToolActivated(tool: Tool)
 	end
 	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
 
-	isOpening = true
+	activeOpenings[localPlayer.Name] = true
 
 	-- Compute drop position: in front of the player, on the ground
 	local dropOrigin = hrp.Position + hrp.CFrame.LookVector * 4

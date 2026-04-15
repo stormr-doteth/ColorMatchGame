@@ -32,6 +32,41 @@ local ChairCatalog: { ChairEntry } = {
 	{ id = "rainbow_chair",    displayName = "Rainbow Chair",    price = 0, modelName = "RainbowChair"    },
 	{ id = "brainrot_throne",  displayName = "Brainrot Throne",  price = 0, modelName = "BrainrotThrone"  },
 
+	-- Common tier (lucky block exclusive)
+	{ id = "wood_chair",      displayName = "Wood Chair",      price = 0, modelName = "WoodChair"      },
+	{ id = "stone_chair",     displayName = "Stone Chair",     price = 0, modelName = "StoneChair"     },
+	{ id = "plastic_chair",   displayName = "Plastic Chair",   price = 0, modelName = "PlasticChair"   },
+	{ id = "brick_chair",     displayName = "Brick Chair",     price = 0, modelName = "BrickChair"     },
+	{ id = "grass_chair",     displayName = "Grass Chair",     price = 0, modelName = "GrassChair"     },
+
+	-- Uncommon tier
+	{ id = "copper_chair",    displayName = "Copper Chair",    price = 0, modelName = "CopperChair"    },
+	{ id = "ice_chair",       displayName = "Ice Chair",       price = 0, modelName = "IceChair"       },
+	{ id = "sand_chair",      displayName = "Sand Chair",      price = 0, modelName = "SandChair"      },
+	{ id = "marble_chair",    displayName = "Marble Chair",    price = 0, modelName = "MarbleChair"    },
+	{ id = "moss_chair",      displayName = "Moss Chair",      price = 0, modelName = "MossChair"      },
+
+	-- Rare tier
+	{ id = "silver_chair",    displayName = "Silver Chair",    price = 0, modelName = "SilverChair"    },
+	{ id = "emerald2_chair",  displayName = "Emerald Chair",   price = 0, modelName = "EmeraldChair2"  },
+	{ id = "frost_chair",     displayName = "Frost Chair",     price = 0, modelName = "FrostChair"     },
+	{ id = "obsidian_chair",  displayName = "Obsidian Chair",  price = 0, modelName = "ObsidianChair"  },
+	{ id = "ruby2_chair",     displayName = "Ruby Chair",      price = 0, modelName = "RubyChair2"     },
+
+	-- Epic tier
+	{ id = "golden_chair",    displayName = "Golden Chair",    price = 0, modelName = "GoldenChair"    },
+	{ id = "void_chair",      displayName = "Void Chair",      price = 0, modelName = "VoidChair"      },
+	{ id = "inferno_chair",   displayName = "Inferno Chair",   price = 0, modelName = "InfernoChair"   },
+	{ id = "aqua_chair",      displayName = "Aqua Chair",      price = 0, modelName = "AquaChair"      },
+	{ id = "plasma_chair",    displayName = "Plasma Chair",    price = 0, modelName = "PlasmaChair"    },
+
+	-- Legendary tier
+	{ id = "cosmic_chair",    displayName = "Cosmic Chair",    price = 0, modelName = "CosmicChair"    },
+	{ id = "phoenix_chair",   displayName = "Phoenix Chair",   price = 0, modelName = "PhoenixChair"   },
+	{ id = "abyss_chair",     displayName = "Abyss Chair",     price = 0, modelName = "AbyssChair"     },
+	{ id = "celestial_chair", displayName = "Celestial Chair", price = 0, modelName = "CelestialChair" },
+	{ id = "omega_chair",     displayName = "Omega Chair",     price = 0, modelName = "OmegaChair"     },
+
 	-- TODO: remove after testing — 25 randomized $1 chairs for UI stress test
 	{ id = "crimson_chair",  displayName = "Crimson Chair",  price = 1, modelName = "CrimsonChair"  },
 	{ id = "azure_chair",    displayName = "Azure Chair",    price = 1, modelName = "AzureChair"    },

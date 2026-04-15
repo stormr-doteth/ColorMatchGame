@@ -1,51 +1,65 @@
 -- ShopCatalog
--- Defines coin packs (dev products) and game passes for the unified shop.
--- Product/pass IDs are placeholders (0) until created on the Roblox dashboard.
--- Update the IDs here once created — no other code changes needed.
+-- Defines dev products (cash, wins) and game passes for the unified shop.
+-- All IDs match the Roblox dashboard. Frames are matched by ItemLabel text
+-- in the manually-designed Shop UI.
 
-export type CoinPack = {
+export type DevProduct = {
 	id: string,
-	displayName: string,
-	coins: number,
-	robuxPrice: number, -- shown in UI (actual price set on dashboard)
-	productId: number, -- Roblox developer product ID (0 = placeholder)
+	displayName: string, -- matches ItemLabel.Text in the UI
+	amount: number, -- how much to grant
+	robuxPrice: number, -- shown in UI
+	productId: number, -- Roblox developer product ID
+	category: string, -- "cash" or "wins"
 }
 
 export type GamePass = {
 	id: string,
-	displayName: string,
-	description: string,
-	robuxPrice: number, -- shown in UI
-	gamePassId: number, -- Roblox game pass ID (0 = placeholder)
-	frameName: string?, -- name of the Frame in Shop.Body.GamePasses (for manual UI)
+	displayName: string, -- matches ItemLabel.Text in the UI
+	robuxPrice: number,
+	gamePassId: number,
 }
 
-local CoinPacks: { CoinPack } = {
-	{ id = "coins_250",   displayName = "Starter Pack",  coins = 250,    robuxPrice = 49,  productId = 3575477629 },
-	{ id = "coins_1000",  displayName = "Small Pack",    coins = 1000,   robuxPrice = 149, productId = 3575477715 },
-	{ id = "coins_5000",  displayName = "Medium Pack",   coins = 5000,   robuxPrice = 499, productId = 3575477758 },
-	{ id = "coins_25000", displayName = "Large Pack",    coins = 25000,  robuxPrice = 1999, productId = 3575478040 },
+local DevProducts: { DevProduct } = {
+	-- Cash packs (in DevProducts frame)
+	{ id = "cash_300",   displayName = "300 CASH",    amount = 300,   robuxPrice = 29,  productId = 3575477629, category = "cash" },
+	{ id = "cash_1000",  displayName = "1,000 CASH",  amount = 1000,  robuxPrice = 89,  productId = 3575477715, category = "cash" },
+	{ id = "cash_2500",  displayName = "2,500 CASH",  amount = 2500,  robuxPrice = 199, productId = 3575477758, category = "cash" },
+	{ id = "cash_5000",  displayName = "5,000 CASH!", amount = 5000,  robuxPrice = 349, productId = 3575478040, category = "cash" },
+
+	-- Wins packs (in DevProducts_Wins frame)
+	{ id = "wins_10",    displayName = "10 WINS",     amount = 10,    robuxPrice = 39,  productId = 3575511557, category = "wins" },
+	{ id = "wins_25",    displayName = "25 WINS",     amount = 25,    robuxPrice = 79,  productId = 3575511597, category = "wins" },
+	{ id = "wins_50",    displayName = "50 WINS",     amount = 50,    robuxPrice = 179, productId = 3575511650, category = "wins" },
+	{ id = "wins_100",   displayName = "100 WINS",    amount = 100,   robuxPrice = 249, productId = 3575511685, category = "wins" },
 }
 
--- frameName = the name of the Frame inside Shop.Body.GamePasses
 local GamePasses: { GamePass } = {
-	{ id = "2x_coins", displayName = "DOUBLE CASH", description = "Double all coin earnings permanently!", robuxPrice = 299, gamePassId = 1797672278, frameName = "DoubleCash" },
-	{ id = "2x_wins",  displayName = "DOUBLE WINS", description = "Double all win earnings permanently!", robuxPrice = 299, gamePassId = 1796710377, frameName = "DoubleWins" },
+	{ id = "2x_cash",   displayName = "DOUBLE CASH",   robuxPrice = 99, gamePassId = 1797672278 },
+	{ id = "2x_wins",   displayName = "DOUBLE WINS",   robuxPrice = 99, gamePassId = 1796963414 },
+	{ id = "2x_streak", displayName = "DOUBLE STREAK", robuxPrice = 99, gamePassId = 1797239408 },
+	{ id = "vip",       displayName = "VIP",            robuxPrice = 49, gamePassId = 1796710377 },
 }
 
 local M = {}
 
-function M.GetCoinPacks(): { CoinPack }
-	return CoinPacks
+function M.GetDevProducts(): { DevProduct }
+	return DevProducts
 end
 
 function M.GetGamePasses(): { GamePass }
 	return GamePasses
 end
 
-function M.GetCoinPack(id: string): CoinPack?
-	for _, pack in CoinPacks do
-		if pack.id == id then return pack end
+function M.GetDevProduct(id: string): DevProduct?
+	for _, p in DevProducts do
+		if p.id == id then return p end
+	end
+	return nil
+end
+
+function M.GetDevProductByProductId(productId: number): DevProduct?
+	for _, p in DevProducts do
+		if p.productId == productId then return p end
 	end
 	return nil
 end

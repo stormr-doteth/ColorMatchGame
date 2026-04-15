@@ -21,6 +21,8 @@ export type LuckyBlockEntry = {
 	modelName: string, -- name of the Model in Workspace (the display block)
 	lootTable: { LootEntry },
 	buyOptions: { BuyOption },
+	robuxProductId: number?, -- dev product ID for Robux purchase (0 or nil = not set yet)
+	shopType: string?, -- "shop" (default) or "cosmetics" — which UI this block opens
 }
 
 local LuckyBlockCatalog: { LuckyBlockEntry } = {
@@ -70,6 +72,93 @@ local LuckyBlockCatalog: { LuckyBlockEntry } = {
 			{ quantity = 1, price = 5 }, -- TODO: raise prices after testing
 			{ quantity = 3, price = 12 },
 			{ quantity = 5, price = 18 },
+		},
+	},
+
+	-- Cosmetics Shop blocks (purchasable with cash + Robux)
+	{
+		id = "common_block",
+		displayName = "Common Block",
+		modelName = "CommonLuckyBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575825989,
+		lootTable = {
+			{ chairId = "wood_chair", weight = 30 },
+			{ chairId = "stone_chair", weight = 25 },
+			{ chairId = "plastic_chair", weight = 20 },
+			{ chairId = "brick_chair", weight = 15 },
+			{ chairId = "grass_chair", weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 350 },
+		},
+	},
+	{
+		id = "uncommon_block",
+		displayName = "Uncommon Block",
+		modelName = "UncommonLuckyBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575826043,
+		lootTable = {
+			{ chairId = "copper_chair", weight = 30 },
+			{ chairId = "ice_chair", weight = 25 },
+			{ chairId = "sand_chair", weight = 20 },
+			{ chairId = "marble_chair", weight = 15 },
+			{ chairId = "moss_chair", weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 750 },
+		},
+	},
+	{
+		id = "rare_block",
+		displayName = "Rare Block",
+		modelName = "RareLuckyBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575826076,
+		lootTable = {
+			{ chairId = "silver_chair", weight = 30 },
+			{ chairId = "emerald2_chair", weight = 25 },
+			{ chairId = "frost_chair", weight = 20 },
+			{ chairId = "obsidian_chair", weight = 15 },
+			{ chairId = "ruby2_chair", weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 1500 },
+		},
+	},
+	{
+		id = "epic_block",
+		displayName = "Epic Block",
+		modelName = "EpicLuckyBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575826120,
+		lootTable = {
+			{ chairId = "golden_chair", weight = 30 },
+			{ chairId = "void_chair", weight = 25 },
+			{ chairId = "inferno_chair", weight = 20 },
+			{ chairId = "aqua_chair", weight = 15 },
+			{ chairId = "plasma_chair", weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 3000 },
+		},
+	},
+	{
+		id = "legendary_block",
+		displayName = "Legendary Block",
+		modelName = "LegendaryLuckyBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575826157,
+		lootTable = {
+			{ chairId = "cosmic_chair", weight = 30 },
+			{ chairId = "phoenix_chair", weight = 25 },
+			{ chairId = "abyss_chair", weight = 20 },
+			{ chairId = "celestial_chair", weight = 15 },
+			{ chairId = "omega_chair", weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 7500 },
 		},
 	},
 }

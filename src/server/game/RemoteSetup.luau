@@ -23,6 +23,7 @@ local REMOTE_NAMES = {
 	"OpenLuckyBlock",
 	"LuckyBlockResult",
 	"OpenLuckyBlockShop",
+	"OpenCosmeticsShop",
 }
 
 local RemoteSetup = {}

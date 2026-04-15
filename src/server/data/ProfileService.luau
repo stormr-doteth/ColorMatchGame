@@ -136,6 +136,14 @@ function ProfileService.AddWin(player)
 	end
 end
 
+function ProfileService.AddWins(player, amount: number)
+	local profile = activeProfiles[player]
+	if profile then
+		profile.Data.Wins += amount
+		notify(player)
+	end
+end
+
 function ProfileService.ResetStreak(player)
 	local profile = activeProfiles[player]
 	if profile then

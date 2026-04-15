@@ -166,8 +166,14 @@ end
 -- Billboard + ProximityPrompt (mirrors ChairShop pattern)
 ---------------------------------------------------------------------------
 
+-- For animated lucky blocks, prefer "Cube" (the visible animated mesh) over
+-- HumanoidRootPart (which is anchored and doesn't move with the animation).
 local function findRootPart(model): BasePart?
 	if model:IsA("Model") then
+		local cube = model:FindFirstChild("Cube")
+		if cube and cube:IsA("BasePart") then
+			return cube
+		end
 		if model.PrimaryPart then
 			return model.PrimaryPart
 		end
@@ -252,8 +258,9 @@ local function setupShopBlock(entry)
 	prompt.Parent = rootPart
 
 	prompt.Triggered:Connect(function(player)
-		-- Open the shop UI on the client instead of purchasing directly
-		local shopRemote = getRemote("OpenLuckyBlockShop")
+		-- Open the appropriate shop UI based on block type
+		local remoteName = if entry.shopType == "cosmetics" then "OpenCosmeticsShop" else "OpenLuckyBlockShop"
+		local shopRemote = getRemote(remoteName)
 		if shopRemote then
 			(shopRemote :: RemoteEvent):FireClient(player, entry.id)
 		end
@@ -417,11 +424,13 @@ local function onOpenLuckyBlock(player: Player, blockId: any, dropPosition: any)
 		end
 	end
 
-	-- Fire result to client for reveal animation (notification deferred to after animation)
+	-- Fire result to ALL clients so everyone sees the reveal animation
 	local resultRemote = getRemote("LuckyBlockResult")
 	if resultRemote then
-		(resultRemote :: RemoteEvent):FireClient(player, {
+		local re = resultRemote :: RemoteEvent
+		re:FireAllClients({
 			blockId = blockId,
+			playerName = player.Name,
 			winnerChairId = winnerChairId,
 			lootChairIds = lootChairIds,
 			dropPosition = dropPosition,
