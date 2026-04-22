@@ -37,7 +37,8 @@ local GamePasses: { GamePass } = {
 	{ id = "2x_cash",   displayName = "DOUBLE CASH",   robuxPrice = 99, gamePassId = 1797672278 },
 	{ id = "2x_wins",   displayName = "DOUBLE WINS",   robuxPrice = 99, gamePassId = 1796963414 },
 	{ id = "2x_streak", displayName = "DOUBLE STREAK", robuxPrice = 99, gamePassId = 1797239408 },
-	{ id = "vip",       displayName = "VIP",            robuxPrice = 49, gamePassId = 1796710377 },
+	{ id = "vip",          displayName = "VIP",            robuxPrice = 149, gamePassId = 1796710377 },
+	{ id = "starter_pack", displayName = "STARTER PACK",   robuxPrice = 99,  gamePassId = 1796993729 },
 }
 
 local M = {}

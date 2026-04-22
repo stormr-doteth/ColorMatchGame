@@ -6,14 +6,20 @@ local Packages = ServerScriptService:WaitForChild("Packages")
 local ProfileStore = require(Packages.ProfileStore)
 
 local PROFILE_TEMPLATE = {
-	Cash = 500, -- TODO: revert to 0 after testing
-	Level = 1,
-	XP = 0,
+	Cash = 0,
 	Wins = 0,
 	WinStreak = 0,
-	Chairs = {} :: { string }, -- array of owned chair ids
-	EquippedChair = "", -- "" means none equipped
-	LuckyBlocks = {} :: { [string]: number }, -- blockId -> count of unopened blocks
+	Chairs = {} :: { string },
+	EquippedChair = "",
+	LuckyBlocks = {} :: { [string]: number },
+	Hints = 0, -- persistent hint inventory
+	Matches = 0, -- persistent match-color inventory
+	LastLoginReward = 0, -- os.time() of last claimed daily reward
+	LoginStreak = 0, -- consecutive days logged in
+	TotalLogins = 0,
+	GroupRewardClaimed = false,
+	VIPRewardClaimed = false,
+	ProcessedReceipts = {} :: { [string]: boolean },
 }
 
 local PlayerStore = ProfileStore.New("PlayerData", PROFILE_TEMPLATE)
@@ -27,11 +33,11 @@ local function getPlayerDataUpdateRemote(): RemoteEvent?
 	if playerDataUpdateRemote then
 		return playerDataUpdateRemote
 	end
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
 	if not remotes then
 		return nil
 	end
-	local remote = remotes:FindFirstChild("PlayerDataUpdate")
+	local remote = remotes:WaitForChild("PlayerDataUpdate", 10)
 	if remote then
 		playerDataUpdateRemote = remote :: RemoteEvent
 	end
@@ -59,11 +65,25 @@ local ProfileService = {}
 
 local function loadProfile(player)
 	local profileKey = ("Player_%d"):format(player.UserId)
-	local profile = PlayerStore:StartSessionAsync(profileKey, {
-		Cancel = function()
-			return player.Parent == nil
-		end,
-	})
+
+	-- Retry with exponential backoff if DataStore is temporarily unavailable.
+	-- Without this, a brief DataStore hiccup kicks every connecting player.
+	local profile = nil
+	local backoffs = { 1, 3, 9 }
+	for attempt = 0, #backoffs do
+		if player.Parent == nil then return end
+		profile = PlayerStore:StartSessionAsync(profileKey, {
+			Cancel = function()
+				return player.Parent == nil
+			end,
+		})
+		if profile ~= nil then break end
+		local delay = backoffs[attempt + 1]
+		if delay then
+			warn(("[ProfileService] Session load failed for %s, retrying in %ds"):format(player.Name, delay))
+			task.wait(delay)
+		end
+	end
 
 	if profile == nil then
 		player:Kick("Could not load your data. Please rejoin.")
@@ -218,6 +238,42 @@ function ProfileService.SetEquippedChair(player, chairId: string): boolean
 	return true
 end
 
+function ProfileService.AddHints(player, amount: number)
+	local profile = activeProfiles[player]
+	if profile and amount > 0 then
+		profile.Data.Hints = (profile.Data.Hints or 0) + amount
+		notify(player)
+	end
+end
+
+function ProfileService.UseHint(player): boolean
+	local profile = activeProfiles[player]
+	if not profile then return false end
+	local count = profile.Data.Hints or 0
+	if count <= 0 then return false end
+	profile.Data.Hints = count - 1
+	notify(player)
+	return true
+end
+
+function ProfileService.AddMatches(player, amount: number)
+	local profile = activeProfiles[player]
+	if profile and amount > 0 then
+		profile.Data.Matches = (profile.Data.Matches or 0) + amount
+		notify(player)
+	end
+end
+
+function ProfileService.UseMatch(player): boolean
+	local profile = activeProfiles[player]
+	if not profile then return false end
+	local count = profile.Data.Matches or 0
+	if count <= 0 then return false end
+	profile.Data.Matches = count - 1
+	notify(player)
+	return true
+end
+
 function ProfileService.AddLuckyBlock(player, blockId: string)
 	local profile = activeProfiles[player]
 	if profile then
@@ -255,6 +311,56 @@ function ProfileService.GetEquippedChair(player): string
 	return profile.Data.EquippedChair or ""
 end
 
+-- Daily reward functions
+function ProfileService.GetDailyRewardData(player): (number, number, number) -- lastReward, streak, totalLogins
+	local profile = activeProfiles[player]
+	if not profile then return 0, 0, 0 end
+	return profile.Data.LastLoginReward or 0, profile.Data.LoginStreak or 0, profile.Data.TotalLogins or 0
+end
+
+function ProfileService.SetDailyRewardData(player, lastReward: number, streak: number, totalLogins: number)
+	local profile = activeProfiles[player]
+	if not profile then return end
+	profile.Data.LastLoginReward = lastReward
+	profile.Data.LoginStreak = streak
+	profile.Data.TotalLogins = totalLogins
+	notify(player)
+end
+
+-- Receipt idempotency: returns true if this receipt is newly recorded, false
+-- if it was already processed (or the profile isn't loaded). ProcessReceipt
+-- must check this BEFORE granting rewards so Roblox retries don't double-grant.
+function ProfileService.TryRecordReceipt(player, receiptId: string): boolean
+	local profile = activeProfiles[player]
+	if not profile then
+		return false
+	end
+	local processed = profile.Data.ProcessedReceipts
+	if processed[receiptId] then
+		return false
+	end
+	processed[receiptId] = true
+	return true
+end
+
+-- Force-flush the profile to DataStore. Use after a monetised grant so we
+-- don't ack PurchaseGranted before the data actually persists. Returns
+-- true if the save landed (or appeared to).
+function ProfileService.SaveProfile(player): boolean
+	local profile = activeProfiles[player]
+	if not profile then
+		return false
+	end
+	local ok, err = pcall(function()
+		profile:Save()
+	end)
+	if not ok then
+		warn(("[ProfileService] SaveProfile failed for %s: %s"):format(player.Name, tostring(err)))
+		return false
+	end
+	return true
+end
+
 function ProfileService.Start()
 	if started then
 		return
@@ -267,6 +373,23 @@ function ProfileService.Start()
 
 	Players.PlayerAdded:Connect(loadProfile)
 	Players.PlayerRemoving:Connect(releaseProfile)
+
+	-- Belt-and-suspenders BindToClose: ProfileStore already handles session
+	-- release on shutdown, but explicitly ending every active session here
+	-- guarantees Roblox waits for saves to flush before terminating the
+	-- server process. Roblox gives us up to 30s here before a hard kill.
+	game:BindToClose(function()
+		for player, _ in activeProfiles do
+			task.spawn(releaseProfile, player)
+		end
+		-- Wait until every active profile has been drained (or we run out
+		-- of time). ProfileStore's EndSession triggers an async save, so
+		-- poll the map rather than assuming a fixed delay.
+		local deadline = os.clock() + 25
+		while next(activeProfiles) and os.clock() < deadline do
+			task.wait(0.2)
+		end
+	end)
 end
 
 return ProfileService

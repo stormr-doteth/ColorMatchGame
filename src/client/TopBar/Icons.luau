@@ -7,9 +7,15 @@ Icons.Settings = {
 }
 
 Icons.InviteFriends = {
-	Image = "rbxassetid://7072725342",
+	Image = "rbxassetid://99746756990193",
 	Caption = "Invite Friends",
 	Order = 2,
+}
+
+Icons.Feedback = {
+	Image = "rbxassetid://131514423361507",
+	Caption = "Send Feedback",
+	Order = 3,
 }
 
 return Icons

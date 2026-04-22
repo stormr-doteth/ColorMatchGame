@@ -1,11 +1,5 @@
 -- InventoryHud
--- Hooks up the StarterGui.ScreenGui.Inventory frame to the live profile data:
---   • Toggle visibility via the Shop "InventoryButton" and the inventory
---     Header.CloseButton.
---   • Render one Item per owned chair, each containing a ViewportFrame that
---     shows a 3D preview of the chair model from ReplicatedStorage.ChairTemplates.
---   • Click an item to equip it; click the equipped item again to unequip.
---   • The currently equipped item gets a gold border.
+-- Shows owned chairs in a grid. Click to equip/unequip.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,31 +13,40 @@ local UIManager = require(script.Parent:WaitForChild("UIManager"))
 local InventoryHud = {}
 
 local EQUIPPED_STROKE = Color3.fromRGB(255, 215, 0)
-local DEFAULT_STROKE = Color3.fromRGB(255, 255, 255)
 
--- Tween configs
+-- Rarity styling: top color is brighter accent, bottom color is deeper base.
+-- A vertical UIGradient + stroke + background tint all pull from this table.
+local RARITY_STYLE: { [string]: { top: Color3, bottom: Color3, stroke: Color3 } } = {
+	common       = { top = Color3.fromRGB(170, 175, 180), bottom = Color3.fromRGB(70, 75, 80),    stroke = Color3.fromRGB(200, 205, 210) },
+	uncommon     = { top = Color3.fromRGB(90, 220, 110),  bottom = Color3.fromRGB(30, 110, 50),   stroke = Color3.fromRGB(130, 255, 150) },
+	rare         = { top = Color3.fromRGB(80, 150, 255),  bottom = Color3.fromRGB(25, 65, 160),   stroke = Color3.fromRGB(120, 190, 255) },
+	epic         = { top = Color3.fromRGB(200, 100, 255), bottom = Color3.fromRGB(95, 30, 160),   stroke = Color3.fromRGB(220, 140, 255) },
+	legendary    = { top = Color3.fromRGB(255, 180, 60),  bottom = Color3.fromRGB(180, 90, 0),    stroke = Color3.fromRGB(255, 215, 100) },
+	glacial      = { top = Color3.fromRGB(140, 230, 255), bottom = Color3.fromRGB(40, 110, 170),  stroke = Color3.fromRGB(180, 240, 255) },
+	stormbringer = { top = Color3.fromRGB(180, 120, 255), bottom = Color3.fromRGB(60, 20, 120),   stroke = Color3.fromRGB(210, 160, 255) },
+	gamepass     = { top = Color3.fromRGB(255, 230, 100), bottom = Color3.fromRGB(180, 130, 0),   stroke = Color3.fromRGB(255, 235, 130) },
+}
+
+local function getRarityStyle(rarity: string?)
+	return RARITY_STYLE[rarity or "common"] or RARITY_STYLE.common
+end
+
+
 local BOUNCE_IN = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local BOUNCE_OUT = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 local ITEM_POP = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local EQUIP_FLASH = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- Bouncy scale animation on an item when clicked
 local function popItem(item: Frame)
-	-- Scale from anchor point (center)
 	item.AnchorPoint = Vector2.new(0.5, 0.5)
-	-- Shrink slightly then bounce back
 	local origSize = item.Size
 	TweenService:Create(item, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = UDim2.new(origSize.X.Scale * 0.9, origSize.X.Offset * 0.9, origSize.Y.Scale * 0.9, origSize.Y.Offset * 0.9),
 	}):Play()
 	task.delay(0.08, function()
-		TweenService:Create(item, ITEM_POP, {
-			Size = origSize,
-		}):Play()
+		TweenService:Create(item, ITEM_POP, { Size = origSize }):Play()
 	end)
 end
 
--- Flash the stroke when equipping
 local function flashEquipStroke(stroke: UIStroke)
 	stroke.Thickness = 8
 	stroke.Color = Color3.fromRGB(255, 255, 200)
@@ -53,27 +56,54 @@ local function flashEquipStroke(stroke: UIStroke)
 	}):Play()
 end
 
-local function setupViewport(viewport: ViewportFrame, model: Model)
-	-- Clear existing 3D content (template viewports may have placeholders),
-	-- but preserve any TextLabel overlays (chairName, equipLabel) that sit
-	-- on top of the viewport.
+local function setupViewport(viewport: ViewportFrame, model: Model, flipSeat: boolean?, zoom: number?)
 	for _, c in viewport:GetChildren() do
-		if not c:IsA("TextLabel") then
-			c:Destroy()
-		end
+		if not c:IsA("TextLabel") then c:Destroy() end
 	end
 
 	local clone = model:Clone()
 	clone.Parent = viewport
-
-	-- Re-centre the model around the world origin so the viewport camera
-	-- frames it cleanly regardless of where it lived in workspace.
 	clone:PivotTo(CFrame.new(0, 0, 0))
-	local boxCFrame, boxSize = clone:GetBoundingBox()
+
+	-- Compute AABB from VISIBLE parts only. `Model:GetBoundingBox()` includes
+	-- every descendant BasePart (invisible VFX/attachment anchors, aura
+	-- emitters, trail parts) — if any of those sit far from the chair body the
+	-- box swells and the camera pulls so far back the chair renders tiny.
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	for _, d in clone:GetDescendants() do
+		if d:IsA("BasePart") and d.Transparency < 1 then
+			local cf = d.CFrame
+			local sx, sy, sz = d.Size.X / 2, d.Size.Y / 2, d.Size.Z / 2
+			for ix = -1, 1, 2 do
+				for iy = -1, 1, 2 do
+					for iz = -1, 1, 2 do
+						local c = cf * Vector3.new(ix * sx, iy * sy, iz * sz)
+						if c.X < minX then minX = c.X end
+						if c.Y < minY then minY = c.Y end
+						if c.Z < minZ then minZ = c.Z end
+						if c.X > maxX then maxX = c.X end
+						if c.Y > maxY then maxY = c.Y end
+						if c.Z > maxZ then maxZ = c.Z end
+					end
+				end
+			end
+		end
+	end
+	local boxCFrame, boxSize
+	if minX ~= math.huge then
+		boxCFrame = CFrame.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2)
+		boxSize = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+	else
+		boxCFrame, boxSize = clone:GetBoundingBox()
+	end
 	clone:PivotTo(CFrame.new(-boxCFrame.Position))
+	if flipSeat then
+		clone:PivotTo(CFrame.Angles(0, math.pi, 0) * clone:GetPivot())
+	end
 
 	local maxExtent = math.max(boxSize.X, boxSize.Y, boxSize.Z)
-	local cameraDistance = maxExtent * 1.4 + 0.5
+	local cameraDistance = (maxExtent * 1.4 + 0.5) * (zoom or 1)
 
 	local camera = Instance.new("Camera")
 	camera.CFrame = CFrame.lookAt(
@@ -86,8 +116,6 @@ local function setupViewport(viewport: ViewportFrame, model: Model)
 	viewport.LightDirection = Vector3.new(-1, -1, -1)
 	viewport.Ambient = Color3.fromRGB(180, 180, 180)
 	viewport.LightColor = Color3.fromRGB(255, 255, 255)
-	-- Fix positioning and transparency so the 3D render is centered and
-	-- visible against the item frame's own background.
 	viewport.AnchorPoint = Vector2.new(0.5, 0.5)
 	viewport.Position = UDim2.fromScale(0.5, 0.5)
 	viewport.BackgroundTransparency = 1
@@ -107,27 +135,28 @@ local function buildItem(template: Frame, entry, index: number, isEquipped: bool
 	item.LayoutOrder = index
 	item.Visible = true
 
-	-- Strip template decoration that fights with the inventory look:
-	-- UIGradient can tint the white bg into unexpected colours, and the
-	-- template's own UIStroke may have unwanted properties.
 	local gradient = item:FindFirstChildOfClass("UIGradient")
-	if gradient then
-		gradient:Destroy()
-	end
-	-- Remove template ItemImage (we use ViewportFrame instead)
+	if gradient then gradient:Destroy() end
 	local itemImage = item:FindFirstChild("ItemImage")
-	if itemImage then
-		itemImage:Destroy()
-	end
+	if itemImage then itemImage:Destroy() end
+	local imgLabel = item:FindFirstChild("ImageLabel")
+	if imgLabel then imgLabel:Destroy() end
 
-	-- Neutral dark background so the 3D preview stands out.
-	item.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-	item.BackgroundTransparency = 0.1
+	local style = getRarityStyle(entry.rarity)
+	item.BackgroundColor3 = style.bottom
+	item.BackgroundTransparency = 0
+
+	local rarityGradient = Instance.new("UIGradient")
+	rarityGradient.Name = "RarityGradient"
+	rarityGradient.Rotation = 90
+	rarityGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, style.top),
+		ColorSequenceKeypoint.new(1, style.bottom),
+	})
+	rarityGradient.Parent = item
 
 	local viewport = item:FindFirstChild("ViewportFrame")
 	if viewport and viewport:IsA("ViewportFrame") then
-		-- Populate the chair name and equip status labels (live inside the
-		-- ViewportFrame in the template, positioned above/below the 3D preview).
 		local chairNameLabel = viewport:FindFirstChild("chairName")
 		if chairNameLabel and chairNameLabel:IsA("TextLabel") then
 			chairNameLabel.Text = entry.displayName
@@ -146,25 +175,21 @@ local function buildItem(template: Frame, entry, index: number, isEquipped: bool
 		local templates = ReplicatedStorage:FindFirstChild("ChairTemplates")
 		local model = templates and templates:FindFirstChild(entry.modelName)
 		if model and model:IsA("Model") then
-			setupViewport(viewport, model)
+			local flip = if entry.viewportFlip ~= nil then entry.viewportFlip else entry.flipSeat
+			setupViewport(viewport, model, flip, entry.viewportZoom)
 		end
 	end
 
-	-- Remove all template UIStrokes and add a single clean one for the
-	-- equip indicator — avoids accidentally modifying a shared/inherited stroke.
 	for _, child in item:GetChildren() do
-		if child:IsA("UIStroke") then
-			child:Destroy()
-		end
+		if child:IsA("UIStroke") then child:Destroy() end
 	end
 	local stroke = Instance.new("UIStroke")
 	stroke.Name = "EquipIndicator"
 	stroke.Thickness = if isEquipped then 4 else 2
-	stroke.Color = if isEquipped then EQUIPPED_STROKE else DEFAULT_STROKE
-	stroke.Transparency = if isEquipped then 0 else 0.5
+	stroke.Color = if isEquipped then EQUIPPED_STROKE else style.stroke
+	stroke.Transparency = if isEquipped then 0 else 0.15
 	stroke.Parent = item
 
-	-- Click handling — overlay an invisible TextButton that fills the item.
 	local clickOverlay = item:FindFirstChild("ClickOverlay")
 	if not clickOverlay then
 		clickOverlay = Instance.new("TextButton")
@@ -190,9 +215,7 @@ end
 
 function InventoryHud.Start()
 	local localPlayer = Players.LocalPlayer
-	if not localPlayer then
-		return
-	end
+	if not localPlayer then return end
 	local playerGui = localPlayer:WaitForChild("PlayerGui")
 
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -200,66 +223,69 @@ function InventoryHud.Start()
 	local equipRemote = remotes:WaitForChild("EquipChair") :: RemoteEvent
 
 	local screenGui = playerGui:WaitForChild("ScreenGui", 10)
-	if not screenGui then
-		warn("[InventoryHud] No ScreenGui found")
-		return
-	end
+	if not screenGui then return end
 
 	local inventory = screenGui:WaitForChild("Inventory", 10)
-	if not inventory then
-		warn("[InventoryHud] No Inventory frame")
-		return
-	end
-	local body = inventory:WaitForChild("Body", 10)
-	local header = inventory:WaitForChild("Header", 10)
+	if not inventory then return end
+
+	-- Support both old "Body" and new "ChairsBody" layout
+	local body = inventory:FindFirstChild("ChairsBody") or inventory:FindFirstChild("Body")
+	local header = inventory:FindFirstChild("Header")
 	local closeButton = header and header:FindFirstChild("CloseButton")
 
-	-- Item template — we'll clone it for each owned chair, then hide the
-	-- original. Without this fallback we'd have nothing to clone.
-	local templateItem = body:FindFirstChild("Item1")
-	if templateItem then
-		templateItem.Visible = false
+	local templateItem = body and body:FindFirstChild("Item1")
+	if templateItem then templateItem.Visible = false end
+
+	-- Grid layout
+	if body then
+		local gridLayout = body:FindFirstChildOfClass("UIGridLayout")
+		if gridLayout then
+			gridLayout.CellSize = UDim2.new(0.22, 0, 0, 160)
+			gridLayout.CellPadding = UDim2.new(0.012, 0, 0, 14)
+			gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		end
+		local bodyPadding = body:FindFirstChildOfClass("UIPadding")
+		if not bodyPadding then
+			bodyPadding = Instance.new("UIPadding")
+			bodyPadding.Parent = body
+		end
+		bodyPadding.PaddingTop = UDim.new(0, 12)
+		bodyPadding.PaddingBottom = UDim.new(0, 12)
+		bodyPadding.PaddingLeft = UDim.new(0, 12)
+		bodyPadding.PaddingRight = UDim.new(0, 12)
+
+		-- Make the ScrollingFrame canvas grow with the grid so every owned
+		-- chair is reachable via scroll, no matter how many the player has.
+		if body:IsA("ScrollingFrame") then
+			body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			body.CanvasSize = UDim2.new(0, 0, 0, 0)
+			body.ScrollingDirection = Enum.ScrollingDirection.Y
+			body.ScrollBarThickness = 8
+			body.ScrollBarImageTransparency = 0.3
+			body.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+		end
 	end
 
-	-- Override the grid layout for consistent cross-device scaling:
-	-- 3 items per row, generous horizontal gaps, tight vertical gaps.
-	local gridLayout = body:FindFirstChildOfClass("UIGridLayout")
-	if gridLayout then
-		gridLayout.CellSize = UDim2.new(0.22, 0, 0, 160)
-		gridLayout.CellPadding = UDim2.new(0.012, 0, 0, 14)
-		gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	end
+	-- Hide AurasBody if it exists (not used in v0)
+	local aurasBody = inventory:FindFirstChild("AurasBody")
+	if aurasBody then aurasBody.Visible = false end
 
-	-- Add inner padding so items don't hug the edges of the scrolling frame.
-	local bodyPadding = body:FindFirstChildOfClass("UIPadding")
-	if not bodyPadding then
-		bodyPadding = Instance.new("UIPadding")
-		bodyPadding.Parent = body
-	end
-	bodyPadding.PaddingTop = UDim.new(0, 12)
-	bodyPadding.PaddingBottom = UDim.new(0, 12)
-	bodyPadding.PaddingLeft = UDim.new(0, 12)
-	bodyPadding.PaddingRight = UDim.new(0, 12)
+	-- Clean up any previously-built FilterBar from an earlier version
+	local existingFilterBar = inventory:FindFirstChild("FilterBar")
+	if existingFilterBar then existingFilterBar:Destroy() end
 
-	-- Inventory starts hidden; player opens it via the InventoryButton.
-	-- Open/close uses bouncy scale tweens anchored from center.
+	-- Open/close
 	inventory.Visible = false
 	inventory.AnchorPoint = Vector2.new(0.5, 0.5)
-
-	-- Store the designer-placed position/size/transparency so tweens can target them.
-	local invOpenPos = inventory.Position
 	local invOpenSize = inventory.Size
 	local invOrigTransparency = inventory.BackgroundTransparency
 	local isAnimating = false
 
 	local function openInventory()
-		if inventory.Visible and not isAnimating then
-			return
-		end
+		if inventory.Visible and not isAnimating then return end
 		UIManager.CloseOthers("Inventory")
 		isAnimating = true
 		inventory.Visible = true
-		-- Start small and transparent, then bounce in
 		inventory.Size = UDim2.new(
 			invOpenSize.X.Scale * 0.7, invOpenSize.X.Offset * 0.7,
 			invOpenSize.Y.Scale * 0.7, invOpenSize.Y.Offset * 0.7
@@ -269,17 +295,12 @@ function InventoryHud.Start()
 			Size = invOpenSize,
 			BackgroundTransparency = invOrigTransparency,
 		}):Play()
-		task.delay(BOUNCE_IN.Time, function()
-			isAnimating = false
-		end)
+		task.delay(BOUNCE_IN.Time, function() isAnimating = false end)
 	end
 
 	local function closeInventory()
-		if not inventory.Visible or isAnimating then
-			return
-		end
+		if not inventory.Visible then return end
 		isAnimating = true
-		-- Shrink + fade, then hide
 		local tween = TweenService:Create(inventory, BOUNCE_OUT, {
 			Size = UDim2.new(
 				invOpenSize.X.Scale * 0.7, invOpenSize.X.Offset * 0.7,
@@ -297,11 +318,7 @@ function InventoryHud.Start()
 	end
 
 	local function toggleInventory()
-		if inventory.Visible then
-			closeInventory()
-		else
-			openInventory()
-		end
+		if inventory.Visible then closeInventory() else openInventory() end
 	end
 
 	local shopButtons = screenGui:FindFirstChild("ShopButtons")
@@ -326,28 +343,35 @@ function InventoryHud.Start()
 		closeButton.Activated:Connect(closeInventory)
 	end
 
-	-- Latest profile snapshot received from the server.
+	-- Rendering
 	local latestData: any = nil
 
-	local function rerender()
-		if not templateItem or not templateItem:IsA("Frame") then
-			return
+	local totalChairs = #ChairCatalog.GetAll()
+
+	local function updateCountLabel(ownedCount: number)
+		local label = inventory:FindFirstChild("IndexLabel", true)
+		if label and label:IsA("TextLabel") then
+			label.Text = string.format("Chairs Owned: %d/%d", ownedCount, totalChairs)
 		end
+	end
+
+	local function rerender()
+		if not templateItem or not body then return end
 		clearBody(body)
 		if typeof(latestData) ~= "table" then
+			updateCountLabel(0)
 			return
 		end
 		local owned = latestData.Chairs or {}
 		local equipped = latestData.EquippedChair or ""
 
+		local ownedCount = 0
 		for index, chairId in owned do
 			local entry = ChairCatalog.Get(chairId)
-			if not entry then
-				continue
-			end
+			if not entry then continue end
+			ownedCount += 1
 			local isEquipped = chairId == equipped
 			local item = buildItem(templateItem, entry, index, isEquipped, function()
-				-- Toggle: clicking equipped unequips; clicking other equips it.
 				if isEquipped then
 					equipRemote:FireServer("")
 				else
@@ -356,6 +380,8 @@ function InventoryHud.Start()
 			end)
 			item.Parent = body
 		end
+
+		updateCountLabel(ownedCount)
 	end
 
 	updateRemote.OnClientEvent:Connect(function(data)
@@ -363,13 +389,12 @@ function InventoryHud.Start()
 		rerender()
 	end)
 
-	-- Click ripple effect — a water-drop ring expands outward from every
-	-- click/tap while the inventory is open. Multiple ripples can overlap.
+	-- Click ripple effect
 	local rippleGui = Instance.new("ScreenGui")
 	rippleGui.Name = "RippleOverlay"
 	rippleGui.ResetOnSpawn = false
 	rippleGui.DisplayOrder = 99
-	rippleGui.IgnoreGuiInset = false -- match input.Position coordinate space
+	rippleGui.IgnoreGuiInset = false
 	rippleGui.Parent = playerGui
 
 	local RIPPLE_START = 10
@@ -397,36 +422,25 @@ function InventoryHud.Start()
 		stroke.Transparency = 0.2
 		stroke.Parent = ring
 
-		local expandTween = TweenService:Create(ring,
+		TweenService:Create(ring,
 			TweenInfo.new(RIPPLE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{
-				Size = UDim2.fromOffset(RIPPLE_END, RIPPLE_END),
-				BackgroundTransparency = 1,
-			}
-		)
-		local strokeTween = TweenService:Create(stroke,
+			{ Size = UDim2.fromOffset(RIPPLE_END, RIPPLE_END), BackgroundTransparency = 1 }
+		):Play()
+		TweenService:Create(stroke,
 			TweenInfo.new(RIPPLE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{ Transparency = 1 }
-		)
-
-		expandTween:Play()
-		strokeTween:Play()
-		expandTween.Completed:Connect(function()
-			ring:Destroy()
-		end)
+		):Play()
+		task.delay(RIPPLE_TIME, function() ring:Destroy() end)
 	end
 
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if not inventory.Visible then
-			return
-		end
+	UserInputService.InputBegan:Connect(function(input, _gameProcessed)
+		if not inventory.Visible then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			spawnRipple(input.Position.X, input.Position.Y)
 		end
 	end)
 
-	-- Register with UIManager so other panels can close us
 	UIManager.Register("Inventory", closeInventory, function()
 		return inventory.Visible
 	end)

@@ -76,6 +76,27 @@ local function setModelTransparency(model: Model, transparency: number)
 	end
 end
 
+-- Toggle all particle-like effects on a chair. When disabling, also clear any
+-- existing particles so they don't linger in place after the chair swaps. When
+-- enabling, burst-emit a small amount so particles are visible even when the
+-- chair is only on-screen for a few frames during the rapid cycle.
+local function setChairEffectsEnabled(model: Model, enabled: boolean, burstDuration: number?)
+	for _, d in model:GetDescendants() do
+		if d:IsA("ParticleEmitter") then
+			d.Enabled = enabled
+			if enabled then
+				-- Emit Rate * burstDuration particles immediately so the swap is visible
+				local count = math.clamp(math.floor(d.Rate * (burstDuration or 0.2)), 1, 60)
+				d:Emit(count)
+			else
+				d:Clear()
+			end
+		elseif d:IsA("Trail") or d:IsA("Beam") or d:IsA("Fire") or d:IsA("Smoke") or d:IsA("Sparkles") then
+			d.Enabled = enabled
+		end
+	end
+end
+
 -- Prepare a chair clone: store original transparency, anchor, disable collision
 local function prepareChairClone(clone: Model)
 	for _, part in clone:GetDescendants() do
@@ -408,10 +429,13 @@ local function playRevealAnimation(data)
 		return
 	end
 
-	-- Also find the block's workspace model to clone a mini version for the drop
-	-- Check Animated Lucky Blocks folder first, then Workspace root
-	local animFolder = Workspace:FindFirstChild("Animated Lucky Blocks")
-	local blockModel = (animFolder and animFolder:FindFirstChild(entry.modelName)) or Workspace:FindFirstChild(entry.modelName)
+	-- Also find the block model to clone a mini version for the drop
+	-- Check ReplicatedStorage template folder first, then Workspace root
+	local luckyFolder = ReplicatedStorage:FindFirstChild("LuckyBlocks")
+	local animFolder = ReplicatedStorage:FindFirstChild("Animated Lucky Blocks")
+	local blockModel = (luckyFolder and luckyFolder:FindFirstChild(entry.modelName))
+		or (animFolder and animFolder:FindFirstChild(entry.modelName))
+		or Workspace:FindFirstChild(entry.modelName)
 
 	-----------------------------------------------------------------------
 	-- Phase 1: Block Drop (0.5s)
@@ -555,6 +579,7 @@ local function playRevealAnimation(data)
 			clone:PivotTo(CFrame.new(chairPos))
 			clone.Parent = Workspace
 			setModelTransparency(clone, 1) -- start invisible
+			setChairEffectsEnabled(clone, false) -- start with effects off
 			chairClones[chairId] = clone
 			chairBaseScales[chairId] = clone:GetScale()
 		end
@@ -575,9 +600,10 @@ local function playRevealAnimation(data)
 
 	-- Swap function: hide current, show next
 	local function showChair(chairId: string)
-		-- Hide previous
+		-- Hide previous + kill its lingering particles
 		if currentVisible then
 			setModelTransparency(currentVisible, 1)
+			setChairEffectsEnabled(currentVisible, false)
 		end
 
 		local model = chairClones[chairId]
@@ -591,6 +617,7 @@ local function playRevealAnimation(data)
 		model:ScaleTo(baseScale)
 		model:PivotTo(CFrame.new(chairPos) * CFrame.Angles(0, spinAngle, 0))
 		setModelTransparency(model, 0)
+		setChairEffectsEnabled(model, true)
 	end
 
 	-- Cycling loop with exponential slowdown

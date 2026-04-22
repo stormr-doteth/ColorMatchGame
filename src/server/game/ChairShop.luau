@@ -17,14 +17,21 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
 local ProfileService = require(script.Parent.Parent:WaitForChild("data"):WaitForChild("ProfileService"))
+local RateLimit = require(script.Parent:WaitForChild("RateLimit"))
 
 local ChairShop = {}
 
 local templatesFolder: Folder? = nil
+local purchaseLocks: { [Player]: boolean } = {}
+
+Players.PlayerRemoving:Connect(function(player)
+	purchaseLocks[player] = nil
+end)
 
 local function getRemote(name: string): RemoteEvent?
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	return remotes and remotes:FindFirstChild(name)
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+	if not remotes then return nil end
+	return remotes:WaitForChild(name, 10)
 end
 
 -- Clone the world chairs into a templates folder so the rest of the codebase
@@ -36,13 +43,23 @@ local function buildTemplates()
 		folder.Name = "ChairTemplates"
 		folder.Parent = ReplicatedStorage
 	end
+	local chairsLibrary = ReplicatedStorage:FindFirstChild("Chairs")
 	for _, entry in ChairCatalog.GetAll() do
 		if folder:FindFirstChild(entry.modelName) then
 			continue
 		end
-		local source = Workspace:FindFirstChild(entry.modelName)
+		-- Prefer ReplicatedStorage.Chairs/<tier>/<model> (organized library),
+		-- fall back to any Workspace location (for cash-shop chairs that live
+		-- in the world for their purchase prompts).
+		local source: Instance? = nil
+		if chairsLibrary then
+			source = chairsLibrary:FindFirstChild(entry.modelName, true)
+		end
+		if not source then
+			source = Workspace:FindFirstChild(entry.modelName, true)
+		end
 		if not source or not source:IsA("Model") then
-			warn(`[ChairShop] Missing chair model in Workspace: {entry.modelName}`)
+			warn(`[ChairShop] Missing chair model: {entry.modelName}`)
 			continue
 		end
 		local clone = source:Clone()
@@ -155,6 +172,15 @@ local function setupShopChair(entry, model: Model)
 	prompt.Parent = rootPart
 
 	prompt.Triggered:Connect(function(player)
+		-- Re-verify proximity server-side; the prompt's MaxActivationDistance
+		-- is advisory and a spoofed trigger could otherwise purchase from
+		-- anywhere on the map.
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not hrp then return end
+		if (hrp.Position - rootPart.Position).Magnitude > prompt.MaxActivationDistance + 5 then
+			return
+		end
 		ChairShop.AttemptPurchase(player, entry.id)
 	end)
 end
@@ -166,23 +192,35 @@ function ChairShop.AttemptPurchase(player: Player, chairId: string)
 	if not entry then
 		return
 	end
-	local data = ProfileService.GetData(player)
-	if not data then
+	if purchaseLocks[player] then
 		return
 	end
-	if ProfileService.OwnsChair(player, chairId) then
-		return
-	end
-	if (data.Cash or 0) < entry.price then
-		return
-	end
-	ProfileService.AddCash(player, -entry.price)
-	ProfileService.AddChair(player, chairId)
+	purchaseLocks[player] = true
+	local ok = pcall(function()
+		local data = ProfileService.GetData(player)
+		if not data then
+			return
+		end
+		if ProfileService.OwnsChair(player, chairId) then
+			return
+		end
+		if (data.Cash or 0) < entry.price then
+			return
+		end
+		ProfileService.AddCash(player, -entry.price)
+		ProfileService.AddChair(player, chairId)
 
-	-- Notify the player that the purchase went through.
-	local notifyRemote = getRemote("ShowNotification")
-	if notifyRemote then
-		(notifyRemote :: RemoteEvent):FireClient(player, `Purchased {entry.displayName}!`)
+		local Analytics = require(script.Parent:WaitForChild("Analytics"))
+		Analytics.LogEconomy(player, "Sink", "Cash", entry.price, "Shop", "chair_" .. chairId, "lobby")
+
+		local notifyRemote = getRemote("ShowNotification")
+		if notifyRemote then
+			(notifyRemote :: RemoteEvent):FireClient(player, `Purchased {entry.displayName}!`)
+		end
+	end)
+	purchaseLocks[player] = nil
+	if not ok then
+		warn(`[ChairShop] AttemptPurchase failed for {player.Name} / {chairId}`)
 	end
 end
 
@@ -191,6 +229,9 @@ local function bindRemotes()
 	if purchase then
 		(purchase :: RemoteEvent).OnServerEvent:Connect(function(player, chairId)
 			if typeof(chairId) ~= "string" then
+				return
+			end
+			if not RateLimit.check("PurchaseChair", player, 0.3) then
 				return
 			end
 			ChairShop.AttemptPurchase(player, chairId)
@@ -202,6 +243,9 @@ local function bindRemotes()
 			if typeof(chairId) ~= "string" then
 				return
 			end
+			if not RateLimit.check("EquipChair", player, 0.2) then
+				return
+			end
 			-- Empty string = unequip; otherwise must own it
 			ProfileService.SetEquippedChair(player, chairId)
 		end)
@@ -211,7 +255,7 @@ end
 function ChairShop.Init()
 	buildTemplates()
 	for _, entry in ChairCatalog.GetAll() do
-		local model = Workspace:FindFirstChild(entry.modelName)
+		local model = Workspace:FindFirstChild(entry.modelName, true)
 		if model and model:IsA("Model") then
 			setupShopChair(entry, model)
 		end

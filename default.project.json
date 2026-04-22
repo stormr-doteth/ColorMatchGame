@@ -55,6 +55,9 @@
       },
       "Server": {
         "$path": "src/server"
+      },
+      "DailyRewards": {
+        "$path": "modules/daily-rewards/src"
       }
     },
     "SoundService": {

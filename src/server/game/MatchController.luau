@@ -5,6 +5,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local computeScore = require(Shared:WaitForChild("computeScore"))
 local Constants = require(Shared:WaitForChild("Constants"))
 local ProfileService = require(ServerScriptService:WaitForChild("Server"):WaitForChild("data"):WaitForChild("ProfileService"))
+local GamePassUtil = require(ServerScriptService:WaitForChild("Server"):WaitForChild("game"):WaitForChild("GamePassUtil"))
+local WinsLeaderboard = require(ServerScriptService:WaitForChild("Server"):WaitForChild("game"):WaitForChild("WinsLeaderboard"))
+local Analytics = require(ServerScriptService:WaitForChild("Server"):WaitForChild("game"):WaitForChild("Analytics"))
 
 -- Lazy remote references (populated after RemoteSetup.Init)
 local Remotes
@@ -43,6 +46,7 @@ function MatchController.new(player1: Player, player2: Player, onComplete: () ->
 	self.finished = false
 	self.guessConnection = nil :: RBXScriptConnection?
 	self.threads = {} :: { thread }
+	self.resignConnections = {} :: { RBXScriptConnection }
 
 	-- Table paper parts for spectators
 	self.targetPaper = nil :: BasePart?
@@ -122,6 +126,16 @@ function MatchController:CreatePapers()
 		Vector3.new(1.0, 0.05, 1.0)
 	)
 
+	-- Tag the papers with the participant UserIds so the client can hide them
+	-- locally for the two players in the match (anti-cheat: prevent peeking at
+	-- the target color on the table surface). Spectators still see them.
+	local p1Id = self.player1 and self.player1.UserId or 0
+	local p2Id = self.player2 and self.player2.UserId or 0
+	for _, paper in { self.targetPaper, self.player1Paper, self.player2Paper } do
+		paper:SetAttribute("Participant1", p1Id)
+		paper:SetAttribute("Participant2", p2Id)
+	end
+
 	-- Store directions and positions for pip placement
 	self.pipDir1 = dir1
 	self.pipDir2 = dir2
@@ -177,14 +191,22 @@ function MatchController:CreatePapers()
 	-- Listen to GuessPreview remote for real-time paper color updates
 	self.previewConnection = getRemote("GuessPreview").OnServerEvent:Connect(function(player, data)
 		if typeof(data) ~= "table" then return end
+		if self.finished or self.phase ~= "guessing" then return end
+		local isPlayer1 = player == self.player1
+		local isPlayer2 = player == self.player2
+		if not isPlayer1 and not isPlayer2 then return end
+		-- Once a player has submitted, their preview is locked in.
+		if isPlayer1 and self.player1Guess ~= nil then return end
+		if isPlayer2 and self.player2Guess ~= nil then return end
+
 		local h = math.clamp(tonumber(data.h) or 0, 0, 1)
 		local s = math.clamp(tonumber(data.s) or 0, 0, 1)
 		local v = math.clamp(tonumber(data.v) or 0, 0, 1)
 		local color = Color3.fromHSV(h, s, v)
 
-		if player == self.player1 and self.player1Paper then
+		if isPlayer1 and self.player1Paper then
 			self.player1Paper.Color = color
-		elseif player == self.player2 and self.player2Paper then
+		elseif isPlayer2 and self.player2Paper then
 			self.player2Paper.Color = color
 		end
 	end)
@@ -323,11 +345,59 @@ function MatchController:Start()
 		roundsToWin = Constants.ROUNDS_TO_WIN,
 	})
 
+	Analytics.LogOnboarding(self.player1, 3, "MatchStarted")
+	Analytics.LogOnboarding(self.player2, 3, "MatchStarted")
+	Analytics.LogCustom(self.player1, "MatchStart", 1, { CustomField04 = self.player2.Name }, "1v1")
+	Analytics.LogCustom(self.player2, "MatchStart", 1, { CustomField04 = self.player1.Name }, "1v1")
+
+	self:ConnectResignHooks()
+
 	-- Round 1 begins with a "Ready / Set / GO!" countdown on the clients.
 	-- StartRound(true) sends the color immediately so the GO! frame can paint
 	-- it as the background, then waits for both players to signal BeginRound
 	-- before starting the show-duration timer.
 	self:StartRound(true)
+end
+
+-- If a player dies or resets their character mid-match, treat it as a
+-- resignation: the other player auto-wins and a notification is broadcast.
+-- Disconnects (player leaving the server) are already handled by TableManager
+-- via :PlayerDisconnected — we funnel both through :PlayerAbandoned.
+function MatchController:ConnectResignHooks()
+	local function hook(player: Player)
+		local function watchCharacter(character: Model)
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+				or character:WaitForChild("Humanoid", 5)
+			if not humanoid then return end
+			local conn
+			conn = humanoid.Died:Connect(function()
+				if conn then conn:Disconnect() end
+				self:PlayerAbandoned(player)
+			end)
+			table.insert(self.resignConnections, conn)
+		end
+
+		-- Any new character during the match = reset = resignation.
+		local charConn = player.CharacterAdded:Connect(function(character)
+			self:PlayerAbandoned(player)
+			watchCharacter(character)
+		end)
+		table.insert(self.resignConnections, charConn)
+
+		if player.Character then
+			watchCharacter(player.Character)
+		end
+	end
+
+	hook(self.player1)
+	hook(self.player2)
+end
+
+function MatchController:DisconnectResignHooks()
+	for _, conn in self.resignConnections do
+		conn:Disconnect()
+	end
+	self.resignConnections = {}
 end
 
 function MatchController:StartRound(waitForBegin: boolean?)
@@ -625,17 +695,87 @@ function MatchController:EndMatch(winner: Player, loser: Player)
 	self.finished = true
 	self.phase = "finished"
 
-	ProfileService.AddCash(winner, Constants.WIN_REWARD)
+	-- Calculate cash reward with game pass multipliers
+	local cashReward = Constants.WIN_REWARD
+	local cashMult = 1
+	if GamePassUtil.HasPass(winner, "VIP") then
+		cashMult *= 1.5
+	end
+	local doubledCash = GamePassUtil.HasPass(winner, "DOUBLE_CASH")
+	if doubledCash then
+		cashMult *= 2
+	end
+	cashReward = math.floor(cashReward * cashMult)
+	ProfileService.AddCash(winner, cashReward)
+	Analytics.LogEconomy(winner, "Source", "Cash", cashReward, "Gameplay", "match_win", "1v1")
+	-- Fire floater when any cash boost is active. Pass the effective multiplier
+	-- so the client can render "+N x3!" when VIP + 2x Cash stack.
+	if cashMult > 1 then
+		local r = getRemote("BoostAwarded")
+		if r then r:FireClient(winner, "DOUBLE_CASH", cashReward, cashMult) end
+	end
+
+	-- Win count (doubled by 2x Wins pass). Use AddWins for the bonus so the
+	-- streak only increments once — the DOUBLE_WINS pass is a win-count boost,
+	-- not a streak boost. Streak stacking lives under DOUBLE_STREAK below.
 	ProfileService.AddWin(winner)
+	if GamePassUtil.HasPass(winner, "DOUBLE_WINS") then
+		ProfileService.AddWins(winner, 1)
+		local r = getRemote("BoostAwarded")
+		if r then r:FireClient(winner, "DOUBLE_WINS", 1) end
+	end
+
+	-- Streak bonus from 2x Streak pass (AddWin already incremented by 1)
+	if GamePassUtil.HasPass(winner, "DOUBLE_STREAK") then
+		local data = ProfileService.GetData(winner)
+		if data then
+			data.WinStreak = (data.WinStreak or 0) + 1
+		end
+		local r = getRemote("BoostAwarded")
+		if r then r:FireClient(winner, "DOUBLE_STREAK", 1) end
+	end
+
 	ProfileService.ResetStreak(loser)
+
+	-- Sync to global leaderboards after all wins/streak mutations.
+	local winnerDataForLB = ProfileService.GetData(winner)
+	if winnerDataForLB then
+		WinsLeaderboard.Record(winner, winnerDataForLB.Wins or 0)
+		WinsLeaderboard.RecordStreak(winner, winnerDataForLB.WinStreak or 0)
+	end
+	WinsLeaderboard.RecordStreak(loser, 0)
+
+	-- Streak milestone bonuses
+	local winnerStreak = 0
+	local wData = ProfileService.GetData(winner)
+	if wData then winnerStreak = wData.WinStreak or 0 end
+
+	local STREAK_MILESTONES = {
+		[3]  = 25,
+		[5]  = 50,
+		[10] = 150,
+		[15] = 250,
+		[25] = 500,
+		[50] = 1500,
+	}
+
+	local streakBonus = STREAK_MILESTONES[winnerStreak]
+	if streakBonus then
+		ProfileService.AddCash(winner, streakBonus)
+		cashReward += streakBonus
+		getRemote("ShowNotification"):FireClient(winner, `{winnerStreak} Win Streak! +${streakBonus} bonus!`)
+	end
 
 	local winnerData = ProfileService.GetData(winner)
 	local loserData = ProfileService.GetData(loser)
 
 	local winnerIsP1 = winner == self.player1
+	local winsAwarded = if GamePassUtil.HasPass(winner, "DOUBLE_WINS") then 2 else 1
 	getRemote("MatchEnd"):FireClient(winner, {
 		won = true,
-		cashEarned = Constants.WIN_REWARD,
+		cashEarned = cashReward,
+		cashMultiplier = cashMult,
+		winsAwarded = winsAwarded,
 		totalWins = winnerData and winnerData.Wins or 0,
 		roundHistory = self:BuildHistoryFor(if winnerIsP1 then 1 else 2),
 	})
@@ -646,10 +786,31 @@ function MatchController:EndMatch(winner: Player, loser: Player)
 		roundHistory = self:BuildHistoryFor(if winnerIsP1 then 2 else 1),
 	})
 
+	-- Analytics: per-match custom event for both players, plus onboarding
+	-- "first match won" step for the winner.
+	Analytics.LogCustom(winner, "MatchEnd", cashReward, {
+		CustomField04 = "win",
+		CustomField05 = tostring(self.roundNumber),
+		CustomField06 = tostring(winnerData and winnerData.WinStreak or 0),
+	}, "1v1")
+	Analytics.LogCustom(loser, "MatchEnd", 0, {
+		CustomField04 = "loss",
+		CustomField05 = tostring(self.roundNumber),
+	}, "1v1")
+	Analytics.LogOnboarding(winner, 4, "FirstMatchWon")
+
 	self:Cleanup()
 end
 
+-- Backwards-compat shim used by TableManager's LeaveTable / PlayerRemoving.
 function MatchController:PlayerDisconnected(player: Player)
+	self:PlayerAbandoned(player)
+end
+
+-- Unified abandonment: awards the remaining player the win and broadcasts a
+-- "<name> abandoned the match!" notification. Idempotent — safe to fire from
+-- multiple hooks (Humanoid.Died, CharacterAdded, PlayerRemoving, LeaveTable).
+function MatchController:PlayerAbandoned(player: Player)
 	if self.finished then
 		return
 	end
@@ -668,10 +829,21 @@ function MatchController:PlayerDisconnected(player: Player)
 
 	ProfileService.AddCash(winner, Constants.WIN_REWARD)
 	ProfileService.AddWin(winner)
-	-- The disconnecting player's streak ends here, even though they're gone.
 	ProfileService.ResetStreak(player)
 
+	local abandonerName = player.DisplayName
+	local notifyRemote = getRemote("ShowNotification")
+	if notifyRemote and winner.Parent then
+		notifyRemote:FireClient(winner, `{abandonerName} abandoned the match!`)
+	end
+
 	local winnerData = ProfileService.GetData(winner)
+
+	if winnerData then
+		WinsLeaderboard.Record(winner, winnerData.Wins or 0)
+		WinsLeaderboard.RecordStreak(winner, winnerData.WinStreak or 0)
+	end
+	WinsLeaderboard.RecordStreak(player, 0)
 
 	if winner.Parent then
 		local winnerIsP1 = winner == self.player1
@@ -680,6 +852,8 @@ function MatchController:PlayerDisconnected(player: Player)
 			cashEarned = Constants.WIN_REWARD,
 			totalWins = winnerData and winnerData.Wins or 0,
 			roundHistory = self:BuildHistoryFor(if winnerIsP1 then 1 else 2),
+			abandoned = true,
+			abandonerName = abandonerName,
 		})
 	end
 
@@ -688,6 +862,7 @@ end
 
 function MatchController:Cleanup()
 	self:DisconnectGuess()
+	self:DisconnectResignHooks()
 	self:CancelThreads()
 	self:DestroyPapers()
 	if self.beginConnection then

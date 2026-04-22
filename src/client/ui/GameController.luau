@@ -383,7 +383,10 @@ local function GameController()
 
 	-- Match end state
 	local matchWon, setMatchWon = React.useState(false)
+	local matchAbandoned, setMatchAbandoned = React.useState(false)
 	local cashEarned, setCashEarned = React.useState(0)
+	local cashMultiplier, setCashMultiplier = React.useState(1)
+	local winsAwarded, setWinsAwarded = React.useState(1)
 	local roundHistory, setRoundHistory = React.useState({})
 	local myRoundOutcomes, setMyRoundOutcomes = React.useState({})
 	-- Flair line on the solo end screen, picked once per match (in the MatchEnd handler)
@@ -414,6 +417,18 @@ local function GameController()
 			if leave then
 				leave:FireServer()
 			end
+		end
+		local ok, ShopButtonsHider = pcall(function()
+			return require(Players.LocalPlayer.PlayerScripts:WaitForChild("Client"):WaitForChild("ShopButtonsHider"))
+		end)
+		if ok and ShopButtonsHider then
+			ShopButtonsHider.Show()
+		end
+		local okBlur, MatchBlur = pcall(function()
+			return require(Players.LocalPlayer.PlayerScripts:WaitForChild("Client"):WaitForChild("MatchBlur"))
+		end)
+		if okBlur and MatchBlur then
+			MatchBlur.Clear()
 		end
 	end, { closing })
 
@@ -569,6 +584,7 @@ local function GameController()
 			setOpponentWins(0)
 			setMyRoundOutcomes({})
 			setRoundHistory({})
+			setMatchAbandoned(false)
 			if data.solo then
 				-- Solo: show the intro screen; player clicks "Play Now" to begin
 				setPhase("soloIntro")
@@ -643,7 +659,10 @@ local function GameController()
 
 		table.insert(connections, remotes:WaitForChild("MatchEnd").OnClientEvent:Connect(function(data)
 			setMatchWon(data.won)
+			setMatchAbandoned(data.abandoned == true)
 			setCashEarned(data.cashEarned or 0)
+			setCashMultiplier(data.cashMultiplier or 1)
+			setWinsAwarded(data.winsAwarded or 1)
 			-- Solo: dismissed by Done/Play Again buttons. 1v1: also no auto-dismiss.
 			if data.solo then
 				setSoloAverage(data.averageScore or 0)
@@ -1040,107 +1059,155 @@ local function GameController()
 			}),
 		})
 	elseif phase == "seated" then
-		content = e("Frame", {
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = 1,
-		}, {
-			Layout = e("UIListLayout", {
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				HorizontalAlignment = Enum.HorizontalAlignment.Center,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				Padding = UDim.new(0, 16),
-			}),
-
-			PlayerCount = StrokedText({
-				Size = UDim2.fromOffset(500, 56),
+		-- Minimal top-anchored UI so the player can still see the world (and
+		-- their chair) while waiting for an opponent. No dark backdrop — this
+		-- phase short-circuits the wrapper below.
+		if isSolo then
+			content = e("Frame", {
+				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
-				Text = if isSolo then "Solo Practice" else `{seatedPlayerCount}/2 Players`,
-				TextColor3 = Color3.fromRGB(255, 255, 255),
-				TextSize = 44,
-				Font = Enum.Font.FredokaOne,
-				LayoutOrder = 1,
-			}),
-
-			Waiting = StrokedText({
-				Size = UDim2.fromOffset(500, 36),
-				BackgroundTransparency = 1,
-				Text = if isSolo then "Starting..." else "Waiting for opponent...",
-				TextColor3 = Color3.fromRGB(200, 200, 200),
-				TextSize = 24,
-				Font = Enum.Font.FredokaOne,
-				LayoutOrder = 2,
-			}),
-
-			-- Invite Friends button — 1v1 only, opens the Roblox native invite
-			-- prompt so the player can pull people in to fill the table.
-			InviteFriends = (not isSolo) and e("TextButton", {
-				Size = UDim2.fromOffset(280, 64),
-				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-				BorderSizePixel = 0,
-				AutoButtonColor = true,
-				Text = "",
-				LayoutOrder = 3,
-				[React.Event.Activated] = function()
-					local localPlayer = Players.LocalPlayer
-					if not localPlayer then
-						return
-					end
-					-- PromptGameInvite can throw if invites aren't enabled in
-					-- this experience; swallow the error so the UI doesn't crash.
-					pcall(function()
-						SocialService:PromptGameInvite(localPlayer)
-					end)
-				end,
 			}, {
-				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
-				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(0, 0, 0),
-					Thickness = 2,
-					Transparency = 0.4,
+				Layout = e("UIListLayout", {
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					HorizontalAlignment = Enum.HorizontalAlignment.Center,
+					VerticalAlignment = Enum.VerticalAlignment.Center,
+					Padding = UDim.new(0, 16),
 				}),
-				Label = e("TextLabel", {
-					Size = UDim2.fromScale(1, 1),
+				Title = StrokedText({
+					Size = UDim2.fromOffset(500, 56),
 					BackgroundTransparency = 1,
-					Text = "INVITE FRIENDS",
-					TextColor3 = Color3.fromRGB(30, 30, 30),
-					TextSize = 26,
+					Text = "Solo Practice",
+					TextColor3 = Color3.fromRGB(255, 255, 255),
+					TextSize = 44,
 					Font = Enum.Font.FredokaOne,
-					TextXAlignment = Enum.TextXAlignment.Center,
-					TextYAlignment = Enum.TextYAlignment.Center,
+					LayoutOrder = 1,
 				}),
-			}) or nil,
-
-			-- Leave Table button — secondary style, sits below Invite Friends.
-			-- Fires LeaveTable on the server which routes through the table's
-			-- match-or-unseat handler, then dismisses the UI locally.
-			LeaveTable = (not isSolo) and e("TextButton", {
-				Size = UDim2.fromOffset(280, 56),
-				BackgroundColor3 = Color3.fromRGB(28, 28, 28),
-				BackgroundTransparency = 0.15,
+				Sub = StrokedText({
+					Size = UDim2.fromOffset(500, 36),
+					BackgroundTransparency = 1,
+					Text = "Starting...",
+					TextColor3 = Color3.fromRGB(200, 200, 200),
+					TextSize = 24,
+					Font = Enum.Font.FredokaOne,
+					LayoutOrder = 2,
+				}),
+			})
+		else
+			content = e("Frame", {
+				Size = UDim2.fromOffset(520, 140),
+				Position = UDim2.new(0.5, 0, 0, 24),
+				AnchorPoint = Vector2.new(0.5, 0),
+				BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+				BackgroundTransparency = 0.55,
 				BorderSizePixel = 0,
-				AutoButtonColor = true,
-				Text = "",
-				LayoutOrder = 4,
-				[React.Event.Activated] = handleClose,
 			}, {
-				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 				Stroke = e("UIStroke", {
 					Color = Color3.fromRGB(255, 255, 255),
-					Thickness = 2,
-					Transparency = 0.5,
+					Thickness = 1.5,
+					Transparency = 0.7,
 				}),
-				Label = e("TextLabel", {
-					Size = UDim2.fromScale(1, 1),
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 14),
+					PaddingBottom = UDim.new(0, 14),
+					PaddingLeft = UDim.new(0, 16),
+					PaddingRight = UDim.new(0, 16),
+				}),
+				Layout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Vertical,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					HorizontalAlignment = Enum.HorizontalAlignment.Center,
+					VerticalAlignment = Enum.VerticalAlignment.Top,
+					Padding = UDim.new(0, 10),
+				}),
+
+				Waiting = StrokedText({
+					Size = UDim2.fromOffset(600, 50),
 					BackgroundTransparency = 1,
-					Text = "LEAVE TABLE",
-					TextColor3 = Color3.fromRGB(220, 220, 220),
-					TextSize = 22,
+					Text = "Waiting for opponent...",
+					TextColor3 = Color3.fromRGB(255, 255, 255),
+					TextSize = 36,
 					Font = Enum.Font.FredokaOne,
-					TextXAlignment = Enum.TextXAlignment.Center,
-					TextYAlignment = Enum.TextYAlignment.Center,
+					LayoutOrder = 1,
 				}),
-			}) or nil,
-		})
+
+				Buttons = e("Frame", {
+					Size = UDim2.fromOffset(440, 48),
+					BackgroundTransparency = 1,
+					LayoutOrder = 2,
+				}, {
+					Row = e("UIListLayout", {
+						FillDirection = Enum.FillDirection.Horizontal,
+						SortOrder = Enum.SortOrder.LayoutOrder,
+						HorizontalAlignment = Enum.HorizontalAlignment.Center,
+						VerticalAlignment = Enum.VerticalAlignment.Center,
+						Padding = UDim.new(0, 12),
+					}),
+
+					InviteFriends = e("TextButton", {
+						Size = UDim2.fromOffset(210, 46),
+						BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+						BackgroundTransparency = 0.05,
+						BorderSizePixel = 0,
+						AutoButtonColor = true,
+						Text = "",
+						LayoutOrder = 1,
+						[React.Event.Activated] = function()
+							local localPlayer = Players.LocalPlayer
+							if not localPlayer then return end
+							pcall(function()
+								SocialService:PromptGameInvite(localPlayer)
+							end)
+						end,
+					}, {
+						Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+						Stroke = e("UIStroke", {
+							Color = Color3.fromRGB(0, 0, 0),
+							Thickness = 2,
+							Transparency = 0.4,
+						}),
+						Label = e("TextLabel", {
+							Size = UDim2.fromScale(1, 1),
+							BackgroundTransparency = 1,
+							Text = "INVITE FRIENDS",
+							TextColor3 = Color3.fromRGB(30, 30, 30),
+							TextSize = 20,
+							Font = Enum.Font.FredokaOne,
+							TextXAlignment = Enum.TextXAlignment.Center,
+							TextYAlignment = Enum.TextYAlignment.Center,
+						}),
+					}),
+
+					LeaveTable = e("TextButton", {
+						Size = UDim2.fromOffset(180, 46),
+						BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+						BackgroundTransparency = 0.2,
+						BorderSizePixel = 0,
+						AutoButtonColor = true,
+						Text = "",
+						LayoutOrder = 2,
+						[React.Event.Activated] = handleClose,
+					}, {
+						Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+						Stroke = e("UIStroke", {
+							Color = Color3.fromRGB(255, 255, 255),
+							Thickness = 2,
+							Transparency = 0.5,
+						}),
+						Label = e("TextLabel", {
+							Size = UDim2.fromScale(1, 1),
+							BackgroundTransparency = 1,
+							Text = "LEAVE TABLE",
+							TextColor3 = Color3.fromRGB(220, 220, 220),
+							TextSize = 18,
+							Font = Enum.Font.FredokaOne,
+							TextXAlignment = Enum.TextXAlignment.Center,
+							TextYAlignment = Enum.TextYAlignment.Center,
+						}),
+					}),
+				}),
+			})
+		end
 	elseif phase == "soloIntro" then
 		content = e("Frame", {
 			Size = UDim2.fromScale(1, 1),
@@ -1284,59 +1351,65 @@ local function GameController()
 				BackgroundTransparency = 1,
 				ZIndex = 2,
 			}, {
-				-- Row for seconds + millis, bottom-aligned horizontally
+				-- Row for seconds + millis. Split into two labels so the seconds
+				-- can slide in/out independently. Roblox TextYAlignment aligns
+				-- text bounding boxes (not glyph baselines), so the Millis needs
+				-- a manual Y offset to compensate for the descent-padding delta
+				-- between 72pt and 32pt FredokaOne. Tune MILLIS_BASELINE_OFFSET
+				-- by ±1–2 pixels in Studio until the digit bottoms are flush.
 				Row = e("Frame", {
 					Size = UDim2.new(1, 0, 0, 80),
 					BackgroundTransparency = 1,
-				}, {
-					RowLayout = e("UIListLayout", {
-						FillDirection = Enum.FillDirection.Horizontal,
-						SortOrder = Enum.SortOrder.LayoutOrder,
-						HorizontalAlignment = Enum.HorizontalAlignment.Center,
-						VerticalAlignment = Enum.VerticalAlignment.Bottom,
-					}),
-
-					SecondsClip = e("Frame", {
-						Size = UDim2.fromOffset(55, 80),
-						BackgroundTransparency = 1,
-						ClipsDescendants = true,
-						LayoutOrder = 1,
-					}, {
-						Outgoing = (secondsSlide < 1 and prevSecondsText ~= "") and StrokedText({
-							Size = UDim2.fromScale(1, 1),
-							Position = UDim2.new(0, 0, secondsSlide, 0),
+				}, (function()
+					local MILLIS_BASELINE_OFFSET = -8 -- tune me (more negative = millis moves up)
+					return {
+						SecondsClip = e("Frame", {
+							Size = UDim2.fromOffset(55, 80),
+							AnchorPoint = Vector2.new(1, 1),
+							Position = UDim2.new(0.5, -2, 1, 0),
 							BackgroundTransparency = 1,
-							Text = prevSecondsText,
-							TextColor3 = Color3.fromRGB(255, 255, 255),
-							TextTransparency = timerTextAlpha + secondsSlide * (1 - timerTextAlpha),
-							TextSize = 72,
-							Font = Enum.Font.FredokaOne,
+							ClipsDescendants = true,
+						}, {
+							Outgoing = (secondsSlide < 1 and prevSecondsText ~= "") and StrokedText({
+								Size = UDim2.fromScale(1, 1),
+								Position = UDim2.new(0, 0, secondsSlide, 0),
+								BackgroundTransparency = 1,
+								Text = prevSecondsText,
+								TextColor3 = Color3.fromRGB(255, 255, 255),
+								TextTransparency = timerTextAlpha + secondsSlide * (1 - timerTextAlpha),
+								TextSize = 72,
+								Font = Enum.Font.FredokaOne,
+								TextYAlignment = Enum.TextYAlignment.Bottom,
+							}),
+
+							Incoming = StrokedText({
+								Size = UDim2.fromScale(1, 1),
+								Position = UDim2.new(0, 0, (1 - secondsSlide) * -1, 0),
+								BackgroundTransparency = 1,
+								Text = secondsText,
+								TextColor3 = Color3.fromRGB(255, 255, 255),
+								TextTransparency = timerTextAlpha,
+								TextSize = 72,
+								Font = Enum.Font.FredokaOne,
+								TextYAlignment = Enum.TextYAlignment.Bottom,
+							}),
 						}),
 
-						Incoming = StrokedText({
-							Size = UDim2.fromScale(1, 1),
-							Position = UDim2.new(0, 0, (1 - secondsSlide) * -1, 0),
+						Millis = StrokedText({
+							Size = UDim2.fromOffset(45, 40),
+							AnchorPoint = Vector2.new(0, 1),
+							Position = UDim2.new(0.5, 4, 1, MILLIS_BASELINE_OFFSET),
 							BackgroundTransparency = 1,
-							Text = secondsText,
+							Text = millisText,
 							TextColor3 = Color3.fromRGB(255, 255, 255),
-							TextTransparency = timerTextAlpha,
-							TextSize = 72,
+							TextTransparency = timerMillisAlpha,
+							TextSize = 32,
 							Font = Enum.Font.FredokaOne,
+							TextXAlignment = Enum.TextXAlignment.Left,
+							TextYAlignment = Enum.TextYAlignment.Bottom,
 						}),
-					}),
-
-					Millis = StrokedText({
-						Size = UDim2.fromOffset(45, 40),
-						BackgroundTransparency = 1,
-						Text = millisText,
-						TextColor3 = Color3.fromRGB(255, 255, 255),
-						TextTransparency = timerMillisAlpha,
-						TextSize = 32,
-						Font = Enum.Font.FredokaOne,
-						TextXAlignment = Enum.TextXAlignment.Left,
-						LayoutOrder = 2,
-					}),
-				}),
+					}
+				end)()),
 
 				-- Subtitle below the row
 				Subtitle = StrokedText({
@@ -1687,7 +1760,9 @@ local function GameController()
 			local localPlayer = Players.LocalPlayer
 			local myName = (localPlayer and localPlayer.DisplayName) or "You"
 
-			local isTie = myWinsCount == oppWinsCount
+			-- Abandonment always resolves to a decisive outcome for the
+			-- remaining player (server granted the win); never render Draw.
+			local isTie = (not matchAbandoned) and (myWinsCount == oppWinsCount)
 			local iWon = (not isTie) and matchWon
 			local oppWonMatch = (not isTie) and (not matchWon)
 
@@ -1949,8 +2024,8 @@ local function GameController()
 			if cashEarned and cashEarned > 0 then
 				hasPills = true
 				pillChildren.CashPill = buildPill({
-					icon = "$",
-					iconKind = "dollar",
+					icon = "rbxassetid://83945987909294",
+					iconKind = "asset",
 					label = `+{cashEarned}`,
 					accent = Color3.fromRGB(255, 220, 110),
 					layoutOrder = 1,
@@ -1958,12 +2033,26 @@ local function GameController()
 			end
 			if iWon then
 				hasPills = true
+				local winLabel = if winsAwarded and winsAwarded > 1 then `+{winsAwarded} WINS` else "+1 WIN"
 				pillChildren.WinPill = buildPill({
 					icon = "rbxassetid://128383063987894",
 					iconKind = "asset",
-					label = "+1 WIN",
+					label = winLabel,
 					accent = Color3.fromRGB(255, 215, 0),
 					layoutOrder = 2,
+				})
+			end
+			if cashMultiplier and cashMultiplier > 1 then
+				hasPills = true
+				local multText = if cashMultiplier == math.floor(cashMultiplier)
+					then string.format("CASH x%d!", cashMultiplier)
+					else string.format("CASH x%.1f!", cashMultiplier)
+				pillChildren.MultPill = buildPill({
+					icon = "rbxassetid://83945987909294",
+					iconKind = "asset",
+					label = multText,
+					accent = Color3.fromRGB(120, 255, 160),
+					layoutOrder = 3,
 				})
 			end
 
@@ -2049,6 +2138,17 @@ local function GameController()
 
 	if not content then
 		return nil
+	end
+
+	-- Seated (1v1) phase: no dark backdrop, no UIScale wrapper — the player
+	-- should see themselves at the table. Render the minimal top UI directly.
+	if phase == "seated" and not isSolo then
+		return e("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+		}, {
+			Inner = content,
+		})
 	end
 
 	-- Show persistent player info bar during 1v1 gameplay phases

@@ -1,8 +1,8 @@
 -- ChairCatalog
 -- Single source of truth for purchasable chair skins. Used by:
---   • Server (ChairShop) to set up shop prompts and validate purchases
---   • Server (TableManager) to look up the equipped chair model on seat
---   • Client (InventoryHud) to render owned chairs in the inventory UI
+--   * Server (ChairShop) to set up shop prompts and validate purchases
+--   * Server (TableManager) to look up the equipped chair model on seat
+--   * Client (InventoryHud) to render owned chairs in the inventory UI
 --
 -- A chair entry is identified by `id` (a stable string saved in the player
 -- profile). `modelName` is the name of the chair Model in workspace, which
@@ -13,86 +13,68 @@ export type ChairEntry = {
 	displayName: string,
 	price: number,
 	modelName: string,
+	rarity: string, -- "common"|"uncommon"|"rare"|"epic"|"legendary"|"stormbringer"|"glacial"
+	flipSeat: boolean?, -- true = rotate entire chair 180° yaw (body + seat together)
+	flipSeatDirection: boolean?, -- true = rotate ONLY the Seat 180° (fixes player-faces-wrong-way when body is correct but Seat was authored reversed)
+	viewportFlip: boolean?, -- override for viewport-only flip. nil = inherit flipSeat; explicit bool decouples viewport from world-flip
+	viewportZoom: number?, -- multiplier on viewport camera distance (>1 = farther/smaller, <1 = closer/bigger)
+	yOffset: number?, -- studs to nudge the chair on Y after ground-snap. Negative lowers the chair. Use when ground-snap's "lowest visible part" lands on an invisible hitbox/anchor that's lower than the visible mesh.
+	displayYOffset: number?, -- Y nudge applied specifically on ChairDisplay shop stands (separate from seated `yOffset`).
 }
 
 local ChairCatalog: { ChairEntry } = {
-	{ id = "red_chair",    displayName = "Red Chair",    price = 100, modelName = "RedChair"    },
-	{ id = "yellow_chair", displayName = "Yellow Chair", price = 250, modelName = "YellowChair" },
-	{ id = "blue_chair",   displayName = "Blue Chair",   price = 500, modelName = "BlueChair"   },
+	-- Common tier (lucky block exclusive) — solid color wooden chairs
+	{ id = "red_chair",    displayName = "Red Chair",    price = 0, modelName = "BaseChair_Red",    rarity = "common" },
+	{ id = "orange_chair", displayName = "Orange Chair", price = 0, modelName = "BaseChair_Orange", rarity = "common" },
+	{ id = "yellow_chair", displayName = "Yellow Chair", price = 0, modelName = "BaseChair_Yellow", rarity = "common" },
+	{ id = "green_chair",  displayName = "Green Chair",  price = 0, modelName = "BaseChair_Green",  rarity = "common" },
+	{ id = "blue_chair",   displayName = "Blue Chair",   price = 0, modelName = "BaseChair_Blue",   rarity = "common" },
+	{ id = "violet_chair", displayName = "Violet Chair", price = 0, modelName = "BaseChair_Violet", rarity = "common" },
 
-	-- Mythic tier (lucky block exclusive)
-	{ id = "crystal_chair",  displayName = "Crystal Chair",  price = 0, modelName = "CrystalChair"  },
-	{ id = "flame_chair",    displayName = "Flame Chair",    price = 0, modelName = "FlameChair"    },
-	{ id = "shadow_chair",   displayName = "Shadow Chair",   price = 0, modelName = "ShadowChair"   },
-	{ id = "galaxy_chair",   displayName = "Galaxy Chair",   price = 0, modelName = "GalaxyChair"   },
+	-- Uncommon tier (lucky block exclusive)
+	{ id = "toilet_chair",   displayName = "Toilet",         price = 0, modelName = "Toilet",         rarity = "uncommon", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "rocking_chair",  displayName = "Rocking Chair",  price = 0, modelName = "RockingChair",   rarity = "uncommon", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "camping_chair",  displayName = "Camping Chair",  price = 0, modelName = "CampingChair",   rarity = "uncommon", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "cushion_chair",  displayName = "Cushion Chair",  price = 0, modelName = "CushionChair",   rarity = "uncommon", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "tree_stump",     displayName = "Tree Stump",     price = 0, modelName = "TreeStump",      rarity = "uncommon", yOffset = -2 },
 
-	-- Brainrot God tier (lucky block exclusive)
-	{ id = "diamond_chair",    displayName = "Diamond Chair",    price = 0, modelName = "DiamondChair"    },
-	{ id = "lava_chair",       displayName = "Lava Chair",       price = 0, modelName = "LavaChair"       },
-	{ id = "rainbow_chair",    displayName = "Rainbow Chair",    price = 0, modelName = "RainbowChair"    },
-	{ id = "brainrot_throne",  displayName = "Brainrot Throne",  price = 0, modelName = "BrainrotThrone"  },
+	-- Rare tier (Rare block exclusive)
+	{ id = "samurai_throne",     displayName = "Samurai Throne",   price = 0, modelName = "Samurai Throne", rarity = "rare", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "regal_throne",       displayName = "Regal Throne",     price = 0, modelName = "Throne",         rarity = "rare", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "toilet_throne",      displayName = "Golden Toilet",    price = 0, modelName = "Golden Toilet",  rarity = "rare", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "phoenix_throne",     displayName = "Phoenix Throne",   price = 0, modelName = "PhoenixThrone",  rarity = "rare", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "rare_gaming_chair",  displayName = "Gaming Chair",     price = 0, modelName = "Gaming Chair",   rarity = "rare", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- Common tier (lucky block exclusive)
-	{ id = "wood_chair",      displayName = "Wood Chair",      price = 0, modelName = "WoodChair"      },
-	{ id = "stone_chair",     displayName = "Stone Chair",     price = 0, modelName = "StoneChair"     },
-	{ id = "plastic_chair",   displayName = "Plastic Chair",   price = 0, modelName = "PlasticChair"   },
-	{ id = "brick_chair",     displayName = "Brick Chair",     price = 0, modelName = "BrickChair"     },
-	{ id = "grass_chair",     displayName = "Grass Chair",     price = 0, modelName = "GrassChair"     },
+	{ id = "opal_throne",         displayName = "Opal Throne",         price = 0, modelName = "OpalThrone",         rarity = "epic", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- Uncommon tier
-	{ id = "copper_chair",    displayName = "Copper Chair",    price = 0, modelName = "CopperChair"    },
-	{ id = "ice_chair",       displayName = "Ice Chair",       price = 0, modelName = "IceChair"       },
-	{ id = "sand_chair",      displayName = "Sand Chair",      price = 0, modelName = "SandChair"      },
-	{ id = "marble_chair",    displayName = "Marble Chair",    price = 0, modelName = "MarbleChair"    },
-	{ id = "moss_chair",      displayName = "Moss Chair",      price = 0, modelName = "MossChair"      },
+	-- Legendary tier (Legendary block exclusive)
+	{ id = "elderwood_throne",       displayName = "Elderwood Throne",       price = 0, modelName = "ElderwoodThrone",       rarity = "legendary", flipSeat = true, flipSeatDirection = true, viewportFlip = false, yOffset = -2.5, displayYOffset = -2 },
+	{ id = "chronos_throne",         displayName = "Chronos Throne",         price = 0, modelName = "ChronosThrone",         rarity = "legendary", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "dragon_emperor_throne",  displayName = "Dragon Emperor Throne",  price = 0, modelName = "DragonEmperorThrone",   rarity = "legendary", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "oblivion_throne",        displayName = "Oblivion Throne",        price = 0, modelName = "OblivionThrone",        rarity = "legendary", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- Rare tier
-	{ id = "silver_chair",    displayName = "Silver Chair",    price = 0, modelName = "SilverChair"    },
-	{ id = "emerald2_chair",  displayName = "Emerald Chair",   price = 0, modelName = "EmeraldChair2"  },
-	{ id = "frost_chair",     displayName = "Frost Chair",     price = 0, modelName = "FrostChair"     },
-	{ id = "obsidian_chair",  displayName = "Obsidian Chair",  price = 0, modelName = "ObsidianChair"  },
-	{ id = "ruby2_chair",     displayName = "Ruby Chair",      price = 0, modelName = "RubyChair2"     },
+	-- Glacial tier (Glacial block exclusive — Robux only)
+	{ id = "glacier_throne",    displayName = "Glacier Throne",    price = 0, modelName = "GlacierThrone",    rarity = "glacial", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "yeti_throne",       displayName = "Yeti Throne",       price = 0, modelName = "YetiThrone",       rarity = "glacial", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "krampus_throne",    displayName = "Krampus Throne",    price = 0, modelName = "KrampusThrone",    rarity = "glacial", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "cryomancer_throne", displayName = "Cryomancer Throne", price = 0, modelName = "CryomancerThrone", rarity = "glacial", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- Epic tier
-	{ id = "golden_chair",    displayName = "Golden Chair",    price = 0, modelName = "GoldenChair"    },
-	{ id = "void_chair",      displayName = "Void Chair",      price = 0, modelName = "VoidChair"      },
-	{ id = "inferno_chair",   displayName = "Inferno Chair",   price = 0, modelName = "InfernoChair"   },
-	{ id = "aqua_chair",      displayName = "Aqua Chair",      price = 0, modelName = "AquaChair"      },
-	{ id = "plasma_chair",    displayName = "Plasma Chair",    price = 0, modelName = "PlasmaChair"    },
+	-- Stormbringer tier (Stormbringer block exclusive)
+	{ id = "thunder_throne",   displayName = "Thunder Throne",   price = 0, modelName = "ThunderThrone",   rarity = "stormbringer", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "tempest_throne",   displayName = "Tempest Throne",   price = 0, modelName = "TempestThrone",   rarity = "stormbringer", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "monsoon_throne",   displayName = "Monsoon Throne",   price = 0, modelName = "MonsoonThrone",   rarity = "stormbringer", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "zeus_throne",      displayName = "Zeus Throne",      price = 0, modelName = "ZeusThrone",      rarity = "stormbringer", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "storm_god_throne", displayName = "Storm God Throne", price = 0, modelName = "StormGodThrone",  rarity = "stormbringer", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- Legendary tier
-	{ id = "cosmic_chair",    displayName = "Cosmic Chair",    price = 0, modelName = "CosmicChair"    },
-	{ id = "phoenix_chair",   displayName = "Phoenix Chair",   price = 0, modelName = "PhoenixChair"   },
-	{ id = "abyss_chair",     displayName = "Abyss Chair",     price = 0, modelName = "AbyssChair"     },
-	{ id = "celestial_chair", displayName = "Celestial Chair", price = 0, modelName = "CelestialChair" },
-	{ id = "omega_chair",     displayName = "Omega Chair",     price = 0, modelName = "OmegaChair"     },
+	-- Epic tier (Epic block exclusive)
+	{ id = "shadow_seat",       displayName = "Shadow Seat",      price = 0, modelName = "ShadowSeat",       rarity = "epic", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "celestial_throne",  displayName = "Celestial Throne", price = 0, modelName = "CelestialThrone",  rarity = "epic", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "flame_throne",      displayName = "Flame Throne",     price = 0, modelName = "FlameThrone",      rarity = "epic", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
+	{ id = "cloud_chair",       displayName = "Cloud Chair",      price = 0, modelName = "CloudChair",       rarity = "epic", flipSeat = true, flipSeatDirection = true, viewportFlip = false },
 
-	-- TODO: remove after testing — 25 randomized $1 chairs for UI stress test
-	{ id = "crimson_chair",  displayName = "Crimson Chair",  price = 1, modelName = "CrimsonChair"  },
-	{ id = "azure_chair",    displayName = "Azure Chair",    price = 1, modelName = "AzureChair"    },
-	{ id = "emerald_chair",  displayName = "Emerald Chair",  price = 1, modelName = "EmeraldChair"  },
-	{ id = "gold_chair",     displayName = "Gold Chair",     price = 1, modelName = "GoldChair"     },
-	{ id = "purple_chair",   displayName = "Purple Chair",   price = 1, modelName = "PurpleChair"   },
-	{ id = "teal_chair",     displayName = "Teal Chair",     price = 1, modelName = "TealChair"     },
-	{ id = "orange_chair",   displayName = "Orange Chair",   price = 1, modelName = "OrangeChair"   },
-	{ id = "pink_chair",     displayName = "Pink Chair",     price = 1, modelName = "PinkChair"     },
-	{ id = "lime_chair",     displayName = "Lime Chair",     price = 1, modelName = "LimeChair"     },
-	{ id = "navy_chair",     displayName = "Navy Chair",     price = 1, modelName = "NavyChair"     },
-	{ id = "coral_chair",    displayName = "Coral Chair",    price = 1, modelName = "CoralChair"    },
-	{ id = "mint_chair",     displayName = "Mint Chair",     price = 1, modelName = "MintChair"     },
-	{ id = "violet_chair",   displayName = "Violet Chair",   price = 1, modelName = "VioletChair"   },
-	{ id = "amber_chair",    displayName = "Amber Chair",    price = 1, modelName = "AmberChair"    },
-	{ id = "cyan_chair",     displayName = "Cyan Chair",     price = 1, modelName = "CyanChair"     },
-	{ id = "magenta_chair",  displayName = "Magenta Chair",  price = 1, modelName = "MagentaChair"  },
-	{ id = "olive_chair",    displayName = "Olive Chair",    price = 1, modelName = "OliveChair"    },
-	{ id = "rust_chair",     displayName = "Rust Chair",     price = 1, modelName = "RustChair"     },
-	{ id = "sky_chair",      displayName = "Sky Chair",      price = 1, modelName = "SkyChair"      },
-	{ id = "peach_chair",    displayName = "Peach Chair",    price = 1, modelName = "PeachChair"    },
-	{ id = "indigo_chair",   displayName = "Indigo Chair",   price = 1, modelName = "IndigoChair"   },
-	{ id = "sage_chair",     displayName = "Sage Chair",     price = 1, modelName = "SageChair"     },
-	{ id = "ruby_chair",     displayName = "Ruby Chair",     price = 1, modelName = "RubyChair"     },
-	{ id = "jade_chair",     displayName = "Jade Chair",     price = 1, modelName = "JadeChair"     },
-	{ id = "sunset_chair",   displayName = "Sunset Chair",   price = 1, modelName = "SunsetChair"   },
+	-- Gamepass exclusives (granted when the matching gamepass is purchased)
+	{ id = "office_chair", displayName = "Office Chair", price = 0, modelName = "OfficeChair", rarity = "gamepass", viewportZoom = 1.8, flipSeat = true, flipSeatDirection = true, viewportFlip = false, yOffset = 1.75 },
+	{ id = "vip_throne",   displayName = "VIP Throne",   price = 0, modelName = "VipThrone",   rarity = "gamepass", flipSeat = true, flipSeatDirection = true, viewportFlip = true },
 }
 
 local byId: { [string]: ChairEntry } = {}

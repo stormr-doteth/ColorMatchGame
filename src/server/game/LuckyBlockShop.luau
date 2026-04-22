@@ -15,30 +15,79 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local LuckyBlockCatalog = require(Shared:WaitForChild("LuckyBlockCatalog"))
 local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
+local Constants = require(Shared:WaitForChild("Constants"))
 local ProfileService = require(script.Parent.Parent:WaitForChild("data"):WaitForChild("ProfileService"))
+local RateLimit = require(script.Parent:WaitForChild("RateLimit"))
+local PolicyGate = require(script.Parent:WaitForChild("PolicyGate"))
 
 local DUPLICATE_REFUND_RATE = 0.25
+local MAX_DROP_DISTANCE = 60 -- studs from player character
+
+-- Duplicate-refund tiers by drop chance (rarer = bigger payout). Used for all
+-- blocks; Robux-only blocks (no cash buyOptions) rely entirely on this table.
+local function refundForChance(chance: number): number
+	if chance < 5 then
+		return 2000
+	elseif chance < 15 then
+		return 750
+	elseif chance < 30 then
+		return 300
+	else
+		return 100
+	end
+end
 
 local LuckyBlockShop = {}
 
 local toolTemplates: Folder? = nil
+local purchaseLocks: { [Player]: boolean } = {}
+
+-- Pending grants: if a player disconnects mid-reveal, we flush these so the
+-- rewards still persist to their profile before ProfileService releases it.
+-- Each entry is a closure that performs the deferred grant (chair + refund).
+local pendingGrants: { [Player]: { () -> () } } = {}
+
+local function queuePending(player: Player, fn: () -> ())
+	local list = pendingGrants[player]
+	if not list then
+		list = {}
+		pendingGrants[player] = list
+	end
+	table.insert(list, fn)
+end
+
+local function flushPending(player: Player)
+	local list = pendingGrants[player]
+	if not list then return end
+	pendingGrants[player] = nil
+	for _, fn in list do
+		local ok, err = pcall(fn)
+		if not ok then warn("[LuckyBlockShop] pending grant failed:", err) end
+	end
+end
 
 local function getRemote(name: string): RemoteEvent?
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	return remotes and remotes:FindFirstChild(name)
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+	if not remotes then return nil end
+	return remotes:WaitForChild(name, 10)
 end
 
 ---------------------------------------------------------------------------
--- Model lookup (checks Animated Lucky Blocks folder first, then Workspace)
+-- Model lookup (checks ReplicatedStorage template folder first, then Workspace)
 ---------------------------------------------------------------------------
 
 local function findBlockModel(name: string): Instance?
-	local folder = Workspace:FindFirstChild("Animated Lucky Blocks")
-	if folder then
-		local found = folder:FindFirstChild(name)
+	local primary = ReplicatedStorage:FindFirstChild("LuckyBlocks")
+	if primary then
+		local found = primary:FindFirstChild(name)
 		if found then return found end
 	end
-	return Workspace:FindFirstChild(name)
+	local fallback = ReplicatedStorage:FindFirstChild("Animated Lucky Blocks")
+	if fallback then
+		local found = fallback:FindFirstChild(name)
+		if found then return found end
+	end
+	return Workspace:FindFirstChild(name, true)
 end
 
 ---------------------------------------------------------------------------
@@ -69,6 +118,9 @@ local function buildToolTemplates()
 		tool.Name = entry.id
 		tool.CanBeDropped = false
 		tool.RequiresHandle = true
+		if entry.imageId then
+			tool.TextureId = "rbxassetid://" .. tostring(entry.imageId)
+		end
 
 		-- Clone the full model so we get all visual parts
 		local clone: Model | BasePart
@@ -79,6 +131,14 @@ local function buildToolTemplates()
 		else
 			warn(`[LuckyBlockShop] Unsupported instance type for {entry.modelName}`)
 			continue
+		end
+
+		-- Strip shop-only UI from the tool (the workspace model has these for
+		-- the purchase prompt; the held tool should not).
+		for _, desc in clone:GetDescendants() do
+			if desc:IsA("ProximityPrompt") or desc:IsA("BillboardGui") then
+				desc:Destroy()
+			end
 		end
 
 		-- Collect all BaseParts and compute bounding box for scaling
@@ -229,9 +289,11 @@ local function makeShopBillboard(parent: BasePart, entry)
 end
 
 local function setupShopBlock(entry)
-	local model = findBlockModel(entry.modelName)
+	-- Only attach interaction prompts to models physically placed in Workspace.
+	-- Models that live only in ReplicatedStorage.LuckyBlocks are used as tool
+	-- sources and have no in-world purchase kiosk.
+	local model = Workspace:FindFirstChild(entry.modelName, true)
 	if not model then
-		warn(`[LuckyBlockShop] Workspace model not found: {entry.modelName}`)
 		return
 	end
 
@@ -258,7 +320,13 @@ local function setupShopBlock(entry)
 	prompt.Parent = rootPart
 
 	prompt.Triggered:Connect(function(player)
-		-- Open the appropriate shop UI based on block type
+		-- Re-verify proximity server-side (MaxActivationDistance is advisory).
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not hrp then return end
+		if (hrp.Position - rootPart.Position).Magnitude > prompt.MaxActivationDistance + 5 then
+			return
+		end
 		local remoteName = if entry.shopType == "cosmetics" then "OpenCosmeticsShop" else "OpenLuckyBlockShop"
 		local shopRemote = getRemote(remoteName)
 		if shopRemote then
@@ -274,49 +342,66 @@ end
 function LuckyBlockShop.AttemptPurchase(player: Player, blockId: string, quantity: number?)
 	local entry = LuckyBlockCatalog.Get(blockId)
 	if not entry then
+		warn(`[LuckyBlockShop] AttemptPurchase: unknown blockId "{blockId}" from {player.Name}`)
 		return
 	end
-	local qty = math.clamp(quantity or 1, 1, 10)
-
-	-- Find matching buyOption for the quantity, or fall back to first option's unit price
-	local totalPrice = 0
-	local foundOption = false
-	for _, opt in entry.buyOptions do
-		if opt.quantity == qty then
-			totalPrice = opt.price
-			foundOption = true
-			break
-		end
+	-- Lucky blocks are paid random items. Even in-game-currency purchases
+	-- can fall under regional "loot box" restrictions, so err on the side
+	-- of caution and refuse all lucky-block acquisitions for restricted
+	-- players regardless of currency.
+	if PolicyGate.IsPaidRandomRestricted(player) then
+		return
 	end
-	if not foundOption then
-		-- Fallback: use first buy option's unit price
-		if #entry.buyOptions > 0 then
-			totalPrice = math.ceil(entry.buyOptions[1].price * qty)
-		else
+	if purchaseLocks[player] then
+		return
+	end
+	purchaseLocks[player] = true
+	pcall(function()
+		local qty = math.clamp(quantity or 1, 1, 10)
+
+		local totalPrice = 0
+		local foundOption = false
+		for _, opt in entry.buyOptions do
+			if opt.quantity == qty then
+				totalPrice = opt.price
+				foundOption = true
+				break
+			end
+		end
+		if not foundOption then
+			if #entry.buyOptions > 0 then
+				totalPrice = math.ceil(entry.buyOptions[1].price * qty)
+			else
+				return
+			end
+		end
+
+		local data = ProfileService.GetData(player)
+		if not data then
 			return
 		end
-	end
+		if (data.Cash or 0) < totalPrice then
+			return
+		end
 
-	local data = ProfileService.GetData(player)
-	if not data then
-		return
-	end
-	if (data.Cash or 0) < totalPrice then
-		return
-	end
+		ProfileService.AddCash(player, -totalPrice)
+		for _ = 1, qty do
+			ProfileService.AddLuckyBlock(player, blockId)
+			LuckyBlockShop.GrantTool(player, blockId)
+		end
 
-	ProfileService.AddCash(player, -totalPrice)
-	for _ = 1, qty do
-		ProfileService.AddLuckyBlock(player, blockId)
-		LuckyBlockShop.GrantTool(player, blockId)
-	end
+		local Analytics = require(script.Parent:WaitForChild("Analytics"))
+		Analytics.LogEconomy(player, "Sink", "Cash", totalPrice, "Shop", "luckyblock_" .. blockId, "lobby")
+		Analytics.LogCustom(player, "LuckyBlockPurchased", qty, { CustomField04 = blockId }, "lobby")
 
-	local notifyRemote = getRemote("ShowNotification")
-	if notifyRemote then
-		local label = if qty > 1 then `Purchased {qty}x {entry.displayName}!` else `Purchased {entry.displayName}!`
-		local nr = notifyRemote :: RemoteEvent
-		nr:FireClient(player, label)
-	end
+		local notifyRemote = getRemote("ShowNotification")
+		if notifyRemote then
+			local label = if qty > 1 then `Purchased {qty}x {entry.displayName}!` else `Purchased {entry.displayName}!`
+			local nr = notifyRemote :: RemoteEvent
+			nr:FireClient(player, label)
+		end
+	end)
+	purchaseLocks[player] = nil
 end
 
 ---------------------------------------------------------------------------
@@ -365,11 +450,21 @@ end
 
 local function onOpenLuckyBlock(player: Player, blockId: any, dropPosition: any)
 	if typeof(blockId) ~= "string" or typeof(dropPosition) ~= "Vector3" then
+		warn(`[LuckyBlockShop] onOpenLuckyBlock rejected from {player.Name}: blockId={typeof(blockId)}, dropPosition={typeof(dropPosition)}`)
+		return
+	end
+
+	-- Reject drop positions that are too far from the player's character. A
+	-- malicious client could otherwise request reveals anywhere in the world.
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root and (dropPosition - (root :: BasePart).Position).Magnitude > MAX_DROP_DISTANCE then
 		return
 	end
 
 	local entry = LuckyBlockCatalog.Get(blockId)
 	if not entry then
+		warn(`[LuckyBlockShop] onOpenLuckyBlock: unknown blockId "{blockId}" from {player.Name}`)
 		return
 	end
 
@@ -390,23 +485,72 @@ local function onOpenLuckyBlock(player: Player, blockId: any, dropPosition: any)
 		table.insert(lootChairIds, loot.chairId)
 	end
 
-	-- Award the chair (or refund if duplicate)
-	local added = ProfileService.AddChair(player, winnerChairId)
+	-- Decide outcome now, but defer the actual chair grant until the reveal
+	-- animation finishes — otherwise the inventory updates before the winner
+	-- is shown and spoils the ending.
+	local alreadyOwned = ProfileService.OwnsChair(player, winnerChairId)
+	local added = not alreadyOwned
 	local chairEntry = ChairCatalog.Get(winnerChairId)
 	local chairName = chairEntry and chairEntry.displayName or winnerChairId
+
+	local delaySeconds = Constants.LUCKY_BLOCK_DROP_TIME + Constants.LUCKY_BLOCK_CYCLE_TIME + 1
+
+	if added then
+		local granted = false
+		local grantChair = function()
+			if granted then return end
+			granted = true
+			ProfileService.AddChair(player, winnerChairId)
+		end
+		queuePending(player, grantChair)
+		task.delay(delaySeconds, function()
+			if player.Parent then
+				grantChair()
+			end
+		end)
+	end
+
+	-- Compute this chair's drop chance (%) for notification + refund tier
+	local chances = LuckyBlockCatalog.GetChances(entry.id)
+	local winnerChance = chances[winnerChairId] or 0
 
 	-- Build the notification message (client will show it after the reveal animation)
 	local notificationMsg: string
 	if added then
-		notificationMsg = `You won {chairName}!`
+		notificationMsg = `You won {chairName}! ({winnerChance}% chance)`
 	else
+		-- Prefer cash-buyOption-based refund for cash-purchasable blocks; for
+		-- Robux-only blocks (buyOptions empty), use the rarity-tier refund.
 		local basePrice = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
 		local refund = math.floor(basePrice * DUPLICATE_REFUND_RATE)
-		if refund > 0 then
-			ProfileService.AddCash(player, refund)
+		if refund <= 0 then
+			refund = refundForChance(winnerChance)
 		end
-		notificationMsg = `Already owned {chairName}! Refunded ${refund}`
+		-- Defer the cash grant until the reveal animation finishes, otherwise
+		-- the balance jumps before the dupe is revealed and spoils the ending.
+		-- Drop + cycle + short winner-bounce tail ≈ DROP + CYCLE + 1s buffer.
+		if refund > 0 then
+			local paid = false
+			local payRefund = function()
+				if paid then return end
+				paid = true
+				ProfileService.AddCash(player, refund)
+			end
+			queuePending(player, payRefund)
+			task.delay(delaySeconds, function()
+				if player.Parent then
+					payRefund()
+				end
+			end)
+		end
+		notificationMsg = `Already owned {chairName}! ({winnerChance}% chance) Refunded ${refund}`
 	end
+
+	local Analytics = require(script.Parent:WaitForChild("Analytics"))
+	Analytics.LogCustom(player, "LuckyBlockOpened", 1, {
+		CustomField04 = blockId,
+		CustomField05 = if added then "new" else "dupe",
+	}, "lobby")
 
 	-- Destroy the tool from the player
 	local character = player.Character
@@ -463,7 +607,12 @@ end
 local function bindRemotes()
 	local openRemote = getRemote("OpenLuckyBlock")
 	if openRemote then
-		(openRemote :: RemoteEvent).OnServerEvent:Connect(onOpenLuckyBlock)
+		(openRemote :: RemoteEvent).OnServerEvent:Connect(function(player, blockId, dropPosition)
+			if not RateLimit.check("OpenLuckyBlock", player, 0.5) then
+				return
+			end
+			onOpenLuckyBlock(player, blockId, dropPosition)
+		end)
 	end
 
 	local purchaseRemote = getRemote("PurchaseLuckyBlock")
@@ -471,6 +620,10 @@ local function bindRemotes()
 		local pr = purchaseRemote :: RemoteEvent
 		pr.OnServerEvent:Connect(function(player, blockId, quantity)
 			if typeof(blockId) ~= "string" then
+				warn(`[LuckyBlockShop] PurchaseLuckyBlock rejected from {player.Name}: blockId type={typeof(blockId)}`)
+				return
+			end
+			if not RateLimit.check("PurchaseLuckyBlock", player, 0.3) then
 				return
 			end
 			local qty = if typeof(quantity) == "number" then math.floor(quantity) else 1
@@ -479,45 +632,26 @@ local function bindRemotes()
 	end
 end
 
--- Play idle animations on all lucky block models in the Animated Lucky Blocks folder
-local BLOCK_ANIM_ID = "rbxassetid://126593292951336"
-
-local function playBlockAnimations()
-	local folder = Workspace:FindFirstChild("Animated Lucky Blocks")
-	if not folder then return end
-
-	for _, block in folder:GetChildren() do
-		if not block:IsA("Model") then continue end
-
-		local animController = block:FindFirstChildOfClass("AnimationController")
-		if not animController then
-			animController = Instance.new("AnimationController")
-			animController.Parent = block
-		end
-
-		local animator = animController:FindFirstChildOfClass("Animator")
-		if not animator then
-			animator = Instance.new("Animator")
-			animator.Parent = animController
-		end
-
-		local anim = Instance.new("Animation")
-		anim.AnimationId = BLOCK_ANIM_ID
-
-		local track = animator:LoadAnimation(anim)
-		track.Looped = true
-		track.Priority = Enum.AnimationPriority.Action
-		track:Play()
-	end
-end
-
 function LuckyBlockShop.Init()
 	buildToolTemplates()
+
+	-- Sanity check: every lucky block needs at least one buy path (cash
+	-- buyOptions, robuxProductId, or robuxPackages) or players won't be able
+	-- to purchase it at all. Warn loudly at boot so missing IDs surface
+	-- before launch instead of after a player complains.
+	for _, entry in LuckyBlockCatalog.GetAll() do
+		local hasCash = entry.buyOptions and #entry.buyOptions > 0
+		local hasRobux = (entry.robuxProductId and entry.robuxProductId > 0)
+			or (entry.robuxPackages and #entry.robuxPackages > 0)
+		if not hasCash and not hasRobux then
+			warn(`[LuckyBlockShop] Block "{entry.id}" has no buy path (cash or Robux) — unpurchaseable`)
+		end
+	end
+
 	for _, entry in LuckyBlockCatalog.GetAll() do
 		setupShopBlock(entry)
 	end
 	bindRemotes()
-	playBlockAnimations()
 
 	-- Grant tools for blocks players already own (e.g. after rejoin)
 	for _, player in Players:GetPlayers() do
@@ -530,6 +664,13 @@ function LuckyBlockShop.Init()
 				grantExistingBlocks(player)
 			end
 		end)
+	end)
+
+	-- If a player disconnects mid-reveal, flush pending grants so the chair
+	-- and/or refund still save to their profile before it releases.
+	Players.PlayerRemoving:Connect(function(player)
+		flushPending(player)
+		purchaseLocks[player] = nil
 	end)
 end
 

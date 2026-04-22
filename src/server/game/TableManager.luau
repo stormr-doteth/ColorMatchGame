@@ -6,6 +6,7 @@ local Constants = require(Shared:WaitForChild("Constants"))
 local MatchController = require(script.Parent.MatchController)
 local SoloMatchController = require(script.Parent.SoloMatchController)
 local ChairShop = require(script.Parent.ChairShop)
+local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
 local ProfileService = require(script.Parent.Parent:WaitForChild("data"):WaitForChild("ProfileService"))
 
 local TableManager = {}
@@ -18,8 +19,9 @@ local PlayerSeatedRemote
 local LeaveTableRemote
 
 local function getRemote(name: string): RemoteEvent
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	return remotes and remotes:FindFirstChild(name)
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+	if not remotes then return nil end
+	return remotes:WaitForChild(name, 10)
 end
 
 local function createBillboard(tablePart: BasePart)
@@ -119,7 +121,73 @@ local function applyChairSkin(chair, player)
 
 	-- Pivot clone so its Seat sits exactly where the original Seat was.
 	clone.PrimaryPart = cloneSeat
-	clone:PivotTo(originalSeat.CFrame)
+	local targetCFrame = originalSeat.CFrame
+	local entry = ChairCatalog.Get(equipped)
+	if entry and entry.flipSeat then
+		targetCFrame = targetCFrame * CFrame.Angles(0, math.pi, 0)
+	end
+	clone:PivotTo(targetCFrame)
+
+	-- Rotate ONLY the Seat 180° so the player sits facing the opposite
+	-- direction. Use when the chair body faces correctly but the Seat was
+	-- authored reversed. Skips WeldConstraints targeting the Seat so the body
+	-- doesn't drag with the rotation.
+	if entry and entry.flipSeatDirection then
+		local disabled = {}
+		for _, desc in clone:GetDescendants() do
+			if desc:IsA("WeldConstraint") then
+				if desc.Part0 == cloneSeat or desc.Part1 == cloneSeat then
+					if desc.Enabled then
+						desc.Enabled = false
+						table.insert(disabled, desc)
+					end
+				end
+			end
+		end
+		cloneSeat.CFrame = cloneSeat.CFrame * CFrame.Angles(0, math.pi, 0)
+		for _, wc in disabled do
+			wc.Enabled = true
+		end
+	end
+
+	-- Ground-snap: align the clone's lowest visible point to the original
+	-- chair's lowest visible point so chairs don't float (throne with a short
+	-- body + tall seat) or clip (chair with a tall body + low seat). Uses the
+	-- true world-space AABB per part (8 rotated corners) since many throne
+	-- parts are tilted.
+	local function lowestVisibleY(root: Instance): number
+		local y = math.huge
+		local parts = if root:IsA("BasePart") then { root } else (root :: Model):GetDescendants()
+		for _, d in parts do
+			if d:IsA("BasePart") and d.Transparency < 1 then
+				local cf = d.CFrame
+				local sx, sy, sz = d.Size.X / 2, d.Size.Y / 2, d.Size.Z / 2
+				for ix = -1, 1, 2 do
+					for iy = -1, 1, 2 do
+						for iz = -1, 1, 2 do
+							local corner = cf * Vector3.new(ix * sx, iy * sy, iz * sz)
+							if corner.Y < y then y = corner.Y end
+						end
+					end
+				end
+			end
+		end
+		return y
+	end
+	local origBottom = lowestVisibleY(chair.part)
+	local cloneBottom = lowestVisibleY(clone)
+	if origBottom ~= math.huge and cloneBottom ~= math.huge then
+		local dy = origBottom - cloneBottom
+		if math.abs(dy) > 0.01 then
+			clone:PivotTo(clone:GetPivot() + Vector3.new(0, dy, 0))
+		end
+	end
+
+	-- Per-chair manual Y offset for chairs whose "lowest visible part"
+	-- lands on an invisible anchor/hitbox lower than the visible mesh.
+	if entry and entry.yOffset and entry.yOffset ~= 0 then
+		clone:PivotTo(clone:GetPivot() + Vector3.new(0, entry.yOffset, 0))
+	end
 
 	-- Hide every BasePart of the original chair (transparency + collision off)
 	-- and disable the original Seat so the player can't auto-snap into it.
@@ -191,6 +259,11 @@ local function seatPlayerInChair(player: Player, chairModel)
 		return
 	end
 	seat:Sit(humanoid)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.UseJumpPower = true
 end
 
 local function kickFromSeat(player: Player)
@@ -200,6 +273,10 @@ local function kickFromSeat(player: Player)
 	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+		humanoid.JumpPower = 50
+		humanoid.JumpHeight = 7.2
 		humanoid.Sit = false
 		humanoid.Jump = true
 	end
@@ -256,6 +333,12 @@ local function seatPlayer(tableId: string, player: Player)
 		maxPlayers = maxPlayers,
 		solo = maxPlayers == 1,
 	})
+
+	local Analytics = require(script.Parent:WaitForChild("Analytics"))
+	Analytics.LogOnboarding(player, 2, "Seated")
+	Analytics.LogCustom(player, "TableSeated", 1, {
+		CustomField04 = if maxPlayers == 1 then "solo" else "1v1",
+	}, if maxPlayers == 1 then "solo" else "1v1")
 
 	-- Start match when table is full
 	if maxPlayers == 1 and count == 1 then
@@ -337,12 +420,25 @@ function TableManager.Init()
 	LeaveTableRemote = remotes:WaitForChild("LeaveTable")
 
 	local tablesFolder = workspace:WaitForChild("Tables", 5)
-	if not tablesFolder then
-		warn("[TableManager] No Tables folder found in Workspace")
+	local soloFolder = workspace:FindFirstChild("SoloTables")
+	if not tablesFolder and not soloFolder then
+		warn("[TableManager] No Tables or SoloTables folder found in Workspace")
 		return
 	end
 
-	for _, tableModel in tablesFolder:GetChildren() do
+	local allTableModels = {}
+	if tablesFolder then
+		for _, m in tablesFolder:GetChildren() do
+			table.insert(allTableModels, m)
+		end
+	end
+	if soloFolder then
+		for _, m in soloFolder:GetChildren() do
+			table.insert(allTableModels, m)
+		end
+	end
+
+	for _, tableModel in allTableModels do
 		if not tableModel:IsA("Model") then
 			continue
 		end
@@ -387,6 +483,16 @@ function TableManager.Init()
 			chairs[2] = { part = chair2, player = nil }
 		end
 
+		-- Disable seats so players can't walk into them and auto-sit. The
+		-- proximity prompt calls seat:Sit(humanoid) programmatically, which
+		-- bypasses the Disabled flag.
+		for _, chair in chairs do
+			local seat = findSeat(chair.part)
+			if seat then
+				seat.Disabled = true
+			end
+		end
+
 		tables[tableId] = {
 			model = tableModel,
 			prompt = prompt,
@@ -405,7 +511,9 @@ function TableManager.Init()
 	end
 
 	-- Handle player requesting to leave
+	local RateLimit = require(script.Parent:WaitForChild("RateLimit"))
 	LeaveTableRemote.OnServerEvent:Connect(function(player)
+		if not RateLimit.check("LeaveTable", player, 0.5) then return end
 		local tableId = playerToTable[player]
 		if not tableId then
 			return
@@ -434,7 +542,7 @@ function TableManager.Init()
 		end
 	end)
 
-	print(`[TableManager] Initialized {#tablesFolder:GetChildren()} tables`)
+	print(`[TableManager] Initialized {#allTableModels} tables`)
 end
 
 return TableManager

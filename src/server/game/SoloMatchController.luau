@@ -37,8 +37,42 @@ function SoloMatchController.new(player: Player, onComplete: () -> ())
 	self.finished = false
 	self.guessConnection = nil :: RBXScriptConnection?
 	self.threads = {} :: { thread }
+	self.resignConnections = {} :: { RBXScriptConnection }
 
 	return self
+end
+
+-- If the player dies or resets during a solo match, end it gracefully so the
+-- table resets instead of leaving them stuck in a broken state.
+function SoloMatchController:ConnectResignHooks()
+	local function watchCharacter(character: Model)
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+			or character:WaitForChild("Humanoid", 5)
+		if not humanoid then return end
+		local conn
+		conn = humanoid.Died:Connect(function()
+			if conn then conn:Disconnect() end
+			self:PlayerDisconnected()
+		end)
+		table.insert(self.resignConnections, conn)
+	end
+
+	local charConn = self.player.CharacterAdded:Connect(function(character)
+		self:PlayerDisconnected()
+		watchCharacter(character)
+	end)
+	table.insert(self.resignConnections, charConn)
+
+	if self.player.Character then
+		watchCharacter(self.player.Character)
+	end
+end
+
+function SoloMatchController:DisconnectResignHooks()
+	for _, conn in self.resignConnections do
+		conn:Disconnect()
+	end
+	self.resignConnections = {}
 end
 
 function SoloMatchController:CancelThreads()
@@ -88,6 +122,8 @@ function SoloMatchController:Start()
 		solo = true,
 		totalRounds = self.totalRounds,
 	})
+
+	self:ConnectResignHooks()
 
 	self.phase = "waitingStart"
 	self.nextConnection = getRemote("NextRound").OnServerEvent:Connect(function(player)
@@ -330,6 +366,7 @@ end
 
 function SoloMatchController:Cleanup()
 	self:DisconnectGuess()
+	self:DisconnectResignHooks()
 	self:CancelThreads()
 	if self.nextConnection then
 		self.nextConnection:Disconnect()

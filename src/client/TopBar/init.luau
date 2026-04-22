@@ -70,4 +70,9 @@ function TopBar.CreateInviteFriendsIcon(): any
 	return icon
 end
 
+function TopBar.CreateFeedbackIcon(): any
+	local icon = TopBar.CreateIcon("Feedback", Icons.Feedback)
+	return icon
+end
+
 return TopBar

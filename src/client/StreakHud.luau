@@ -9,17 +9,12 @@ local RunService = game:GetService("RunService")
 
 local StreakHud = {}
 
--- Distance-based scaling: BillboardGui's offset Size is constant screen pixels
--- by default, which makes the billboard look enormous when the camera is far
--- from the character. We adjust Size every render frame so that the billboard
--- shrinks with distance, like the character itself does.
-local REFERENCE_DISTANCE = 18 -- studs — billboard renders at base size at this distance
+local REFERENCE_DISTANCE = 18
 local BASE_SIZE_X = 140
 local BASE_SIZE_Y = 56
 local MIN_SCALE = 0.25
 local MAX_SCALE = 1.4
 
--- One entry per player whose streak we're currently rendering
 type Entry = {
 	billboard: BillboardGui,
 	label: TextLabel,
@@ -32,20 +27,10 @@ local active: { [Player]: Entry } = {}
 
 local function destroy(player: Player)
 	local entry = active[player]
-	if not entry then
-		return
-	end
-	if entry.headConn then
-		entry.headConn:Disconnect()
-		entry.headConn = nil
-	end
-	if entry.renderConn then
-		entry.renderConn:Disconnect()
-		entry.renderConn = nil
-	end
-	if entry.billboard then
-		entry.billboard:Destroy()
-	end
+	if not entry then return end
+	if entry.headConn then entry.headConn:Disconnect() end
+	if entry.renderConn then entry.renderConn:Disconnect() end
+	if entry.billboard then entry.billboard:Destroy() end
 	active[player] = nil
 end
 
@@ -96,13 +81,11 @@ local function refresh(player: Player)
 	end
 
 	local entry = active[player]
-	-- If we already have a live billboard on the right head, just update text.
 	if entry and entry.billboard.Parent and entry.billboard.Adornee == head then
 		entry.label.Text = `🔥 {streak}`
 		return
 	end
 
-	-- Otherwise (re)create. Old billboard is destroyed first if it existed.
 	destroy(player)
 	local bb, label = buildBillboard(head, streak)
 	local entryRef: Entry
@@ -111,23 +94,13 @@ local function refresh(player: Player)
 		label = label,
 		head = head,
 		headConn = head.AncestryChanged:Connect(function(_, parent)
-			if parent == nil then
-				destroy(player)
-			end
+			if parent == nil then destroy(player) end
 		end),
 		renderConn = RunService.RenderStepped:Connect(function()
-			if not bb.Parent then
-				return
-			end
+			if not bb.Parent then return end
 			local camera = workspace.CurrentCamera
-			if not camera then
-				return
-			end
+			if not camera then return end
 			local distance = (camera.CFrame.Position - head.Position).Magnitude
-			-- Larger billboard when far away would normally fight the point of
-			-- "distance falloff", so we cap with REFERENCE_DISTANCE / distance:
-			-- at the reference distance the scale is 1, getting closer makes it
-			-- larger (capped) and farther makes it smaller (also capped).
 			local scale = math.clamp(REFERENCE_DISTANCE / math.max(distance, 0.01), MIN_SCALE, MAX_SCALE)
 			bb.Size = UDim2.fromOffset(BASE_SIZE_X * scale, BASE_SIZE_Y * scale)
 		end),
@@ -140,10 +113,7 @@ local function watchPlayer(player: Player)
 		refresh(player)
 	end)
 	player.CharacterAdded:Connect(function()
-		-- Wait a frame for the Head to land before measuring.
-		task.defer(function()
-			refresh(player)
-		end)
+		task.defer(function() refresh(player) end)
 	end)
 	if player.Character then
 		refresh(player)

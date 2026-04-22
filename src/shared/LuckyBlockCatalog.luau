@@ -15,150 +15,159 @@ export type BuyOption = {
 	price: number, -- total cost
 }
 
+export type RobuxPackage = {
+	quantity: number, -- how many blocks this product grants
+	productId: number, -- dev product ID (0 = not set yet)
+}
+
 export type LuckyBlockEntry = {
 	id: string,
 	displayName: string,
 	modelName: string, -- name of the Model in Workspace (the display block)
 	lootTable: { LootEntry },
 	buyOptions: { BuyOption },
-	robuxProductId: number?, -- dev product ID for Robux purchase (0 or nil = not set yet)
+	robuxProductId: number?, -- dev product ID for single-block Robux purchase
+	robuxPrice: number?, -- Robux price for display (set on the Creator Dashboard for the actual product)
+	robuxPackages: { RobuxPackage }?, -- multi-quantity Robux packages (e.g. 1x/3x/5x)
 	shopType: string?, -- "shop" (default) or "cosmetics" — which UI this block opens
+	imageId: number?, -- asset ID for the block's image/icon in shop cards
 }
 
 local LuckyBlockCatalog: { LuckyBlockEntry } = {
-	{
-		id = "secret_block",
-		displayName = "Secret Lucky Block",
-		modelName = "Secret Lucky Block",
-		lootTable = {
-			{ chairId = "red_chair", weight = 30 },
-			{ chairId = "blue_chair", weight = 25 },
-			{ chairId = "yellow_chair", weight = 25 },
-			{ chairId = "teal_chair", weight = 20 },
-		},
-		buyOptions = {
-			{ quantity = 1, price = 1 }, -- TODO: raise prices after testing
-			{ quantity = 3, price = 2 },
-			{ quantity = 5, price = 3 },
-		},
-	},
-	{
-		id = "mythic_block",
-		displayName = "Mythic Lucky Block",
-		modelName = "Mythic Lucky Block",
-		lootTable = {
-			{ chairId = "crystal_chair", weight = 40 },
-			{ chairId = "flame_chair", weight = 30 },
-			{ chairId = "shadow_chair", weight = 20 },
-			{ chairId = "galaxy_chair", weight = 10 },
-		},
-		buyOptions = {
-			{ quantity = 1, price = 2 }, -- TODO: raise prices after testing
-			{ quantity = 3, price = 5 },
-			{ quantity = 5, price = 7 },
-		},
-	},
-	{
-		id = "brainrot_block",
-		displayName = "Brainrot God Lucky Block",
-		modelName = "Brainrot God Lucky Block",
-		lootTable = {
-			{ chairId = "diamond_chair", weight = 40 },
-			{ chairId = "lava_chair", weight = 30 },
-			{ chairId = "rainbow_chair", weight = 20 },
-			{ chairId = "brainrot_throne", weight = 10 },
-		},
-		buyOptions = {
-			{ quantity = 1, price = 5 }, -- TODO: raise prices after testing
-			{ quantity = 3, price = 12 },
-			{ quantity = 5, price = 18 },
-		},
-	},
-
 	-- Cosmetics Shop blocks (purchasable with cash + Robux)
 	{
 		id = "common_block",
 		displayName = "Common Block",
-		modelName = "CommonLuckyBlock",
+		modelName = "CommonBlock",
 		shopType = "cosmetics",
 		robuxProductId = 3575825989,
+		robuxPrice = 9,
+		imageId = 105629651259186,
 		lootTable = {
-			{ chairId = "wood_chair", weight = 30 },
-			{ chairId = "stone_chair", weight = 25 },
-			{ chairId = "plastic_chair", weight = 20 },
-			{ chairId = "brick_chair", weight = 15 },
-			{ chairId = "grass_chair", weight = 10 },
+			{ chairId = "red_chair",    weight = 1 },
+			{ chairId = "yellow_chair", weight = 1 },
+			{ chairId = "green_chair",  weight = 1 },
+			{ chairId = "blue_chair",   weight = 1 },
+			{ chairId = "violet_chair", weight = 1 },
 		},
 		buyOptions = {
-			{ quantity = 1, price = 350 },
+			{ quantity = 1, price = 250 },
 		},
 	},
 	{
 		id = "uncommon_block",
 		displayName = "Uncommon Block",
-		modelName = "UncommonLuckyBlock",
+		modelName = "UncommonBlock",
 		shopType = "cosmetics",
 		robuxProductId = 3575826043,
+		robuxPrice = 15,
+		imageId = 90687483761350,
 		lootTable = {
-			{ chairId = "copper_chair", weight = 30 },
-			{ chairId = "ice_chair", weight = 25 },
-			{ chairId = "sand_chair", weight = 20 },
-			{ chairId = "marble_chair", weight = 15 },
-			{ chairId = "moss_chair", weight = 10 },
+			{ chairId = "toilet_chair",  weight = 1 },
+			{ chairId = "rocking_chair", weight = 1 },
+			{ chairId = "camping_chair", weight = 1 },
+			{ chairId = "cushion_chair", weight = 1 },
+			{ chairId = "tree_stump",    weight = 1 },
 		},
 		buyOptions = {
-			{ quantity = 1, price = 750 },
+			{ quantity = 1, price = 500 },
 		},
 	},
 	{
 		id = "rare_block",
 		displayName = "Rare Block",
-		modelName = "RareLuckyBlock",
+		modelName = "RareBlock",
 		shopType = "cosmetics",
 		robuxProductId = 3575826076,
+		robuxPrice = 25,
+		imageId = 129221708610973,
 		lootTable = {
-			{ chairId = "silver_chair", weight = 30 },
-			{ chairId = "emerald2_chair", weight = 25 },
-			{ chairId = "frost_chair", weight = 20 },
-			{ chairId = "obsidian_chair", weight = 15 },
-			{ chairId = "ruby2_chair", weight = 10 },
+			{ chairId = "rare_gaming_chair", weight = 30 },
+			{ chairId = "regal_throne",      weight = 25 },
+			{ chairId = "toilet_throne",     weight = 20 },
+			{ chairId = "samurai_throne",    weight = 15 },
+			{ chairId = "phoenix_throne",    weight = 10 },
+		},
+		buyOptions = {
+			{ quantity = 1, price = 800 },
+		},
+	},
+	{
+		id = "epic_block",
+		displayName = "Epic Block",
+		modelName = "EpicBlock",
+		shopType = "cosmetics",
+		robuxProductId = 3575826120,
+		robuxPrice = 49,
+		imageId = 112821596275173,
+		lootTable = {
+			{ chairId = "cloud_chair",      weight = 50 },
+			{ chairId = "flame_throne",     weight = 30 },
+			{ chairId = "celestial_throne", weight = 13 },
+			{ chairId = "shadow_seat",      weight = 5 },
+			{ chairId = "opal_throne",      weight = 2 },
 		},
 		buyOptions = {
 			{ quantity = 1, price = 1500 },
 		},
 	},
 	{
-		id = "epic_block",
-		displayName = "Epic Block",
-		modelName = "EpicLuckyBlock",
-		shopType = "cosmetics",
-		robuxProductId = 3575826120,
+		id = "glacial_block",
+		displayName = "Glacial Block",
+		modelName = "GlacialBlock",
+		robuxProductId = 3578611641,
+		robuxPackages = {
+			{ quantity = 1, productId = 3578611641 },
+			{ quantity = 3, productId = 3578989408 },
+			{ quantity = 5, productId = 3578989491 },
+		},
+		imageId = 137563051885989,
 		lootTable = {
-			{ chairId = "golden_chair", weight = 30 },
-			{ chairId = "void_chair", weight = 25 },
-			{ chairId = "inferno_chair", weight = 20 },
-			{ chairId = "aqua_chair", weight = 15 },
-			{ chairId = "plasma_chair", weight = 10 },
+			{ chairId = "glacier_throne",    weight = 50 },
+			{ chairId = "yeti_throne",       weight = 30 },
+			{ chairId = "krampus_throne",    weight = 15 },
+			{ chairId = "cryomancer_throne", weight = 5 },
+		},
+		buyOptions = {}, -- Robux only, no cash purchase
+	},
+	{
+		id = "stormbringer_block",
+		displayName = "Storm Block",
+		modelName = "StormBlock",
+		robuxProductId = 3578611508,
+		robuxPackages = {
+			{ quantity = 1, productId = 3578611508 },
+			{ quantity = 3, productId = 3578989669 },
+			{ quantity = 5, productId = 3578989769 },
+		},
+		imageId = 116470141222904,
+		lootTable = {
+			{ chairId = "thunder_throne",   weight = 50 },
+			{ chairId = "tempest_throne",   weight = 30 },
+			{ chairId = "monsoon_throne",   weight = 13 },
+			{ chairId = "zeus_throne",      weight = 5 },
+			{ chairId = "storm_god_throne", weight = 2 },
 		},
 		buyOptions = {
-			{ quantity = 1, price = 3000 },
+			{ quantity = 1, price = 5000 },
 		},
 	},
 	{
 		id = "legendary_block",
 		displayName = "Legendary Block",
-		modelName = "LegendaryLuckyBlock",
+		modelName = "LegendaryBlock",
 		shopType = "cosmetics",
 		robuxProductId = 3575826157,
+		robuxPrice = 69,
+		imageId = 134983609308824,
 		lootTable = {
-			{ chairId = "cosmic_chair", weight = 30 },
-			{ chairId = "phoenix_chair", weight = 25 },
-			{ chairId = "abyss_chair", weight = 20 },
-			{ chairId = "celestial_chair", weight = 15 },
-			{ chairId = "omega_chair", weight = 10 },
+			{ chairId = "elderwood_throne",      weight = 45 },
+			{ chairId = "chronos_throne",        weight = 30 },
+			{ chairId = "dragon_emperor_throne", weight = 20 },
+			{ chairId = "oblivion_throne",       weight = 5 },
 		},
 		buyOptions = {
-			{ quantity = 1, price = 7500 },
+			{ quantity = 1, price = 2500 },
 		},
 	},
 }

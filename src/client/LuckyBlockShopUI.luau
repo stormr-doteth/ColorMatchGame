@@ -10,7 +10,9 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local LuckyBlockCatalog = require(Shared:WaitForChild("LuckyBlockCatalog"))
@@ -30,7 +32,7 @@ local ROBUX_ICON = utf8.char(0xE002)
 -- Helpers
 ---------------------------------------------------------------------------
 
-local function setupViewport(viewport: ViewportFrame, model: Model)
+local function setupViewport(viewport: ViewportFrame, model: Model, zoom: number?, flipSeat: boolean?)
 	for _, c in viewport:GetChildren() do
 		if c:IsA("Camera") or c:IsA("Model") or c:IsA("BasePart") then
 			c:Destroy()
@@ -42,9 +44,14 @@ local function setupViewport(viewport: ViewportFrame, model: Model)
 	clone:PivotTo(CFrame.new(0, 0, 0))
 	local boxCFrame, boxSize = clone:GetBoundingBox()
 	clone:PivotTo(CFrame.new(-boxCFrame.Position))
+	if flipSeat then
+		-- Rotate 180° around the (now-centered) bounding box center
+		clone:PivotTo(CFrame.Angles(0, math.pi, 0) * clone:GetPivot())
+	end
 
 	local maxExtent = math.max(boxSize.X, boxSize.Y, boxSize.Z)
-	local cameraDistance = maxExtent * 1.4 + 0.5
+	local distanceMult = zoom or 1.4
+	local cameraDistance = maxExtent * distanceMult + 0.5
 
 	local camera = Instance.new("Camera")
 	camera.CFrame = CFrame.lookAt(
@@ -90,18 +97,60 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 		itemLabel.Text = entry.displayName
 	end
 
-	-- Buy button
-	local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
-	if submitFrame then
-		local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
-		if submitBtn then
-			local price = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
-			submitBtn.Text = ROBUX_ICON .. " " .. tostring(price)
+	-- Block image
+	local blockImage = card:FindFirstChild("BlockImage") :: ImageLabel?
+	if blockImage and entry.imageId then
+		blockImage.Image = "rbxassetid://" .. tostring(entry.imageId)
+	end
+
+	-- Buy buttons. Two supported layouts:
+	--   Legacy: a single `SubmitButton` frame with a child SubmitButton button.
+	--   Multi-package: `Purchase_1x`, `Purchase_3x`, `Purchase_5x` frames each
+	--      with a child SubmitButton — one per robuxPackages entry.
+	local function wirePackageButton(frame: Frame, pkg)
+		local submitBtn = frame:FindFirstChild("SubmitButton") :: TextButton?
+		if not submitBtn then return end
+		if pkg.productId and pkg.productId > 0 then
 			submitBtn.Activated:Connect(function()
-				popButton(submitFrame)
-				local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
-				purchaseRemote:FireServer(entry.id, qty)
+				popButton(frame)
+				MarketplaceService:PromptProductPurchase(localPlayer, pkg.productId)
 			end)
+		else
+			submitBtn.Activated:Connect(function()
+				popButton(frame)
+				warn(`[LuckyBlockShop] No productId set for {entry.id} x{pkg.quantity}`)
+			end)
+		end
+	end
+
+	if entry.robuxPackages and (card:FindFirstChild("Purchase_1x") or card:FindFirstChild("Purchase_3x") or card:FindFirstChild("Purchase_5x")) then
+		for _, pkg in entry.robuxPackages do
+			local frame = card:FindFirstChild("Purchase_" .. tostring(pkg.quantity) .. "x") :: Frame?
+			if frame then
+				wirePackageButton(frame, pkg)
+			end
+		end
+	else
+		local submitFrame = card:FindFirstChild("SubmitButton") :: Frame?
+		if submitFrame then
+			local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
+			if submitBtn then
+				local productId = entry.robuxProductId or 0
+				if productId > 0 then
+					submitBtn.Activated:Connect(function()
+						popButton(submitFrame)
+						MarketplaceService:PromptProductPurchase(localPlayer, productId)
+					end)
+				else
+					local price = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
+					submitBtn.Text = ROBUX_ICON .. " " .. tostring(price)
+					submitBtn.Activated:Connect(function()
+						popButton(submitFrame)
+						local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
+						purchaseRemote:FireServer(entry.id, qty)
+					end)
+				end
+			end
 		end
 	end
 
@@ -109,15 +158,33 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 	local possibleItems = card:FindFirstChild("PossibleItems") :: Frame?
 	if not possibleItems then return end
 
-	local slots: { ImageButton } = {}
+	-- Slots may be ImageButton (legacy) or Frame (new Glacial-style layout)
+	local slots: { GuiObject } = {}
 	for _, child in possibleItems:GetChildren() do
-		if child:IsA("ImageButton") then
+		if child:IsA("ImageButton") or child:IsA("Frame") then
 			table.insert(slots, child)
 		end
 	end
+	-- UIListLayout orders by LayoutOrder then by Name — match that for consistency
+	table.sort(slots, function(a, b)
+		if a.LayoutOrder ~= b.LayoutOrder then
+			return a.LayoutOrder < b.LayoutOrder
+		end
+		return a.Name < b.Name
+	end)
 
 	local sortedLoot = table.clone(entry.lootTable)
 	table.sort(sortedLoot, function(a, b) return a.weight > b.weight end)
+
+	-- Per-block viewport overrides: `zoom` = camera distance multiplier (smaller
+	-- = tighter crop). `frameScale` > 1 makes the viewport overflow its slot so
+	-- the chair appears to "burst out" beyond the card bounds.
+	local VIEWPORT_OVERRIDE: { [string]: { zoom: number, frameScale: number } } = {
+		legendary_block = { zoom = 0.7, frameScale = 1.4 },
+	}
+	local override = VIEWPORT_OVERRIDE[entry.id]
+	local zoom = override and override.zoom or nil
+	local frameScale = override and override.frameScale or 1
 
 	for i, slot in slots do
 		local loot = sortedLoot[i]
@@ -129,24 +196,59 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 		local chairEntry = ChairCatalog.Get(loot.chairId)
 		local pct = chances[loot.chairId] or 0
 
-		local slotLabel = slot:FindFirstChild("ItemLabel") :: TextLabel?
-		if slotLabel then
-			slotLabel.Text = `{pct}%`
+		-- Chance label: prefer explicit ChanceLabel, fall back to ItemLabel
+		local chanceLabel = slot:FindFirstChild("ChanceLabel") :: TextLabel?
+		local itemSlotLabel = slot:FindFirstChild("ItemLabel") :: TextLabel?
+		if chanceLabel then
+			chanceLabel.Text = `{pct}%`
+			if itemSlotLabel and chairEntry then
+				itemSlotLabel.Text = chairEntry.displayName
+			end
+		elseif itemSlotLabel then
+			-- Legacy layout: single label shows % only
+			itemSlotLabel.Text = `{pct}%`
 		end
 
+		-- Slot image may be named "ItemImage" (legacy) or "ImageLabel" (new)
 		local slotImage = slot:FindFirstChild("ItemImage") :: ImageLabel?
-		if slotImage and chairEntry and chairTemplates then
+		if not slotImage then
+			slotImage = slot:FindFirstChild("ImageLabel") :: ImageLabel?
+		end
+		-- Blocks listed here keep their pre-designed slot images instead of
+		-- having a ViewportFrame overlaid on top.
+		local SKIP_VIEWPORT: { [string]: boolean } = {
+			glacial_block = true,
+			stormbringer_block = true,
+		}
+
+		if slotImage and chairEntry and chairTemplates and not SKIP_VIEWPORT[entry.id] then
 			local template = chairTemplates:FindFirstChild(chairEntry.modelName)
 			if template and template:IsA("Model") then
+				-- Remove any pre-existing ItemViewport (templates ship with
+				-- placeholder chair models that must be cleared).
+				for _, child in slot:GetChildren() do
+					if child:IsA("ViewportFrame") then
+						child:Destroy()
+					end
+				end
 				local vf = Instance.new("ViewportFrame")
 				vf.Name = "ItemViewport"
-				vf.Size = slotImage.Size
-				vf.Position = slotImage.Position
-				vf.AnchorPoint = slotImage.AnchorPoint
+				local baseSize = slotImage.Size
+				vf.Size = UDim2.new(
+					baseSize.X.Scale * frameScale, baseSize.X.Offset * frameScale,
+					baseSize.Y.Scale * frameScale, baseSize.Y.Offset * frameScale
+				)
+				vf.Position = UDim2.fromScale(0.5, 0.5)
+				vf.AnchorPoint = Vector2.new(0.5, 0.5)
 				vf.BackgroundTransparency = 1
 				vf.ZIndex = slotImage.ZIndex
+				vf.ClipsDescendants = false
+				if frameScale > 1 then
+					slot.ClipsDescendants = false
+				end
 				vf.Parent = slot
-				setupViewport(vf, template)
+				local flip = if chairEntry.viewportFlip ~= nil then chairEntry.viewportFlip else chairEntry.flipSeat
+				setupViewport(vf, template, zoom, flip)
 				slotImage.Visible = false
 			end
 		end
@@ -214,14 +316,34 @@ local function buildShop(shopFrame: Frame)
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local purchaseRemote = remotes:WaitForChild("PurchaseLuckyBlock") :: RemoteEvent
 
+	-- Paid random items policy. Restricted players (e.g. Belgium, Netherlands)
+	-- must not be offered any lucky block purchase. The attribute is set on
+	-- the player by the server PolicyGate; we check it per-card at open time
+	-- and react to changes in case the server's async fetch resolves late.
+	local function luckyBlocksRestricted(): boolean
+		return localPlayer:GetAttribute("ArePaidRandomItemsRestricted") == true
+	end
+
+	local lbCards: { Frame } = {}
+
 	-- Lucky Blocks: wire existing manually-designed cards (named LuckyBlock_{id})
 	for _, entry in LuckyBlockCatalog.GetAll() do
 		if entry.shopType == "cosmetics" then continue end
 		local card = body:FindFirstChild("LuckyBlock_" .. entry.id) :: Frame?
 		if card then
 			wireBlockCard(card, entry, purchaseRemote)
+			table.insert(lbCards, card)
 		end
 	end
+
+	local function applyRestriction()
+		local hide = luckyBlocksRestricted()
+		for _, card in lbCards do
+			card.Visible = not hide
+		end
+	end
+	applyRestriction()
+	localPlayer:GetAttributeChangedSignal("ArePaidRandomItemsRestricted"):Connect(applyRestriction)
 
 	-- Dev Products: wire cards by matching ItemLabel.Text to catalog displayName
 	-- Searches inside DevProducts, DevProducts_Wins, and top-level frames (BigCash, BigWins)
@@ -293,6 +415,16 @@ local function buildShop(shopFrame: Frame)
 	if vipCard then
 		local pass = gamePassesByName["VIP"]
 		if pass then wireGamePassCard(vipCard, pass) end
+
+		-- Rewrite any stale "2x Cash" text authored in Studio → "1.5x Cash Rewards".
+		for _, d in vipCard:GetDescendants() do
+			if d:IsA("TextLabel") or d:IsA("TextButton") then
+				local t = string.lower(d.Text)
+				if string.find(t, "2x%s*cash") then
+					d.Text = "1.5x Cash Rewards"
+				end
+			end
+		end
 	end
 
 	-- Close button
@@ -315,7 +447,7 @@ local shopFrame: Frame? = nil
 local isVisible = false
 local isAnimating = false
 
-function LuckyBlockShopUI.Open()
+function LuckyBlockShopUI.Open(focusBlockId: string?)
 	if isVisible or isAnimating then return end
 	if not shopFrame then return end
 	UIManager.CloseOthers("Shop")
@@ -332,10 +464,24 @@ function LuckyBlockShopUI.Open()
 
 	isVisible = true
 	task.delay(BOUNCE_IN.Time, function() isAnimating = false end)
+
+	-- Auto-scroll: legendary block lives at the bottom of the Body scrolling
+	-- frame, so when it's the focus, jump the scroll to max Y once layout
+	-- has settled.
+	if focusBlockId == "legendary_block" then
+		local body = shopFrame:FindFirstChild("Body")
+		if body and body:IsA("ScrollingFrame") then
+			task.defer(function()
+				local sf = body :: ScrollingFrame
+				local canvas = sf.AbsoluteCanvasSize
+				sf.CanvasPosition = Vector2.new(0, math.max(0, canvas.Y))
+			end)
+		end
+	end
 end
 
 function LuckyBlockShopUI.Close()
-	if not isVisible or isAnimating then return end
+	if not isVisible then return end
 	if not shopFrame then return end
 	isAnimating = true
 
@@ -418,8 +564,8 @@ function LuckyBlockShopUI.Start()
 	local openShopRemote = remotes:WaitForChild("OpenLuckyBlockShop", 5)
 	if openShopRemote then
 		local remote = openShopRemote :: RemoteEvent
-		remote.OnClientEvent:Connect(function()
-			LuckyBlockShopUI.Open()
+		remote.OnClientEvent:Connect(function(blockId)
+			LuckyBlockShopUI.Open(blockId)
 		end)
 	end
 
@@ -430,6 +576,51 @@ function LuckyBlockShopUI.Start()
 	if cosmeticsShop then
 		cosmeticsShop:SetAttribute("OrigSize", cosmeticsShop.Size)
 		cosmeticsShop.Visible = false
+
+		-- Collected at card-wire time below; mutated from inside the `if
+		-- cosBody` block, read from the attribute-change handler at the end
+		-- of this scope.
+		local cosCardsOuter: { Frame } = {}
+		local restrictionBanner: TextLabel? = nil
+		local function ensureRestrictionBanner(): TextLabel
+			if restrictionBanner then return restrictionBanner end
+			local banner = Instance.new("TextLabel")
+			banner.Name = "PaidRandomItemsRestrictedBanner"
+			banner.Size = UDim2.new(1, -40, 0, 70)
+			banner.Position = UDim2.new(0.5, 0, 0.5, 0)
+			banner.AnchorPoint = Vector2.new(0.5, 0.5)
+			banner.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+			banner.BackgroundTransparency = 0.05
+			banner.BorderSizePixel = 0
+			banner.Text = "Paid random items aren't allowed in your region."
+			banner.TextColor3 = Color3.fromRGB(255, 230, 200)
+			banner.TextScaled = true
+			banner.Font = Enum.Font.FredokaOne
+			banner.ZIndex = 50
+			banner.Visible = false
+			banner.Parent = cosmeticsShop
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 12)
+			corner.Parent = banner
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = Color3.fromRGB(255, 140, 90)
+			stroke.Thickness = 2
+			stroke.Parent = banner
+			local padding = Instance.new("UIPadding")
+			padding.PaddingLeft = UDim.new(0, 12)
+			padding.PaddingRight = UDim.new(0, 12)
+			padding.Parent = banner
+			restrictionBanner = banner
+			return banner
+		end
+		local function applyCosmeticsRestriction()
+			local hide = localPlayer:GetAttribute("ArePaidRandomItemsRestricted") == true
+			for _, card in cosCardsOuter do
+				card.Visible = not hide
+			end
+			local banner = ensureRestrictionBanner()
+			banner.Visible = hide
+		end
 
 		local cosBody = cosmeticsShop:FindFirstChild("Body") :: ScrollingFrame?
 		if cosBody then
@@ -454,6 +645,14 @@ function LuckyBlockShopUI.Start()
 				local entry = cosmeticsByName[itemLabel.Text]
 				if not entry then continue end
 
+				table.insert(cosCardsOuter, card)
+
+				-- Block image
+				local blockImage = card:FindFirstChild("BlockImage") :: ImageLabel?
+				if blockImage and entry.imageId then
+					blockImage.Image = "rbxassetid://" .. tostring(entry.imageId)
+				end
+
 				local cashPrice = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
 				local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
 
@@ -471,7 +670,10 @@ function LuckyBlockShopUI.Start()
 								cosPurchaseRemote:FireServer(entry.id, qty)
 							end)
 						else
-							-- Robux buy button (price text set in UI)
+							-- Robux buy button — Roblox Robux glyph + price
+							if entry.robuxPrice then
+								rl.Text = utf8.char(0xE002) .. tostring(entry.robuxPrice)
+							end
 							child.Activated:Connect(function()
 								popButton(child)
 								local productId = entry.robuxProductId or 0
@@ -535,6 +737,11 @@ function LuckyBlockShopUI.Start()
 						if slotImage and chairEntry and chairTemplates then
 							local template = chairTemplates:FindFirstChild(chairEntry.modelName)
 							if template and template:IsA("Model") then
+								for _, child in slot:GetChildren() do
+									if child:IsA("ViewportFrame") then
+										child:Destroy()
+									end
+								end
 								local vf = Instance.new("ViewportFrame")
 								vf.Name = "ItemViewport"
 								vf.Size = slotImage.Size
@@ -555,6 +762,9 @@ function LuckyBlockShopUI.Start()
 		local cosmeticsVisible = false
 		local cosmeticsAnimating = false
 
+		-- Snappier open for walk-up: tighter duration, smaller start scale,
+		-- less overshoot. Walk-up should feel instant.
+		local COSMETICS_OPEN = TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		local function openCosmetics()
 			if cosmeticsVisible or cosmeticsAnimating then return end
 			UIManager.CloseOthers("Cosmetics")
@@ -562,13 +772,13 @@ function LuckyBlockShopUI.Start()
 			cosmeticsShop.AnchorPoint = Vector2.new(0.5, 0.5)
 			local targetSize = cosmeticsShop:GetAttribute("OrigSize") or cosmeticsShop.Size
 			cosmeticsShop.Size = UDim2.new(
-				targetSize.X.Scale * 0.7, targetSize.X.Offset * 0.7,
-				targetSize.Y.Scale * 0.7, targetSize.Y.Offset * 0.7
+				targetSize.X.Scale * 0.85, targetSize.X.Offset * 0.85,
+				targetSize.Y.Scale * 0.85, targetSize.Y.Offset * 0.85
 			)
 			cosmeticsShop.Visible = true
-			TweenService:Create(cosmeticsShop, BOUNCE_IN, { Size = targetSize }):Play()
+			TweenService:Create(cosmeticsShop, COSMETICS_OPEN, { Size = targetSize }):Play()
 			cosmeticsVisible = true
-			task.delay(BOUNCE_IN.Time, function() cosmeticsAnimating = false end)
+			task.delay(COSMETICS_OPEN.Time, function() cosmeticsAnimating = false end)
 		end
 
 		local function closeCosmetics()
@@ -581,7 +791,7 @@ function LuckyBlockShopUI.Start()
 			)
 			local tween = TweenService:Create(cosmeticsShop, BOUNCE_OUT, { Size = shrunkSize })
 			tween:Play()
-			tween.Completed:Connect(function()
+					tween.Completed:Connect(function()
 				cosmeticsShop.Visible = false
 				cosmeticsShop.Size = targetSize
 				cosmeticsVisible = false
@@ -594,25 +804,10 @@ function LuckyBlockShopUI.Start()
 		end
 
 		UIManager.Register("Cosmetics", closeCosmetics, function() return cosmeticsVisible end)
+		applyCosmeticsRestriction()
+		localPlayer:GetAttributeChangedSignal("ArePaidRandomItemsRestricted"):Connect(applyCosmeticsRestriction)
 
-		-- Hook up CosmeticsButton
-		if shopButtons then
-			local cosmBtn = shopButtons:FindFirstChild("CosmeticsButton")
-			if cosmBtn then
-				local overlay = cosmBtn:FindFirstChild("CosmeticsClickOverlay")
-				if not overlay then
-					overlay = Instance.new("TextButton")
-					overlay.Name = "CosmeticsClickOverlay"
-					overlay.Size = UDim2.fromScale(1, 1)
-					overlay.BackgroundTransparency = 1
-					overlay.Text = ""
-					overlay.ZIndex = 10
-					overlay.Parent = cosmBtn
-				end
-				local btn = overlay :: TextButton
-				btn.Activated:Connect(toggleCosmetics)
-			end
-		end
+		-- CosmeticsButton is now used for Rewards panel (wired in RewardsUI.luau)
 
 		-- Close button inside CosmeticsShop
 		local cosHeader = cosmeticsShop:FindFirstChild("Header") :: Frame?
@@ -630,6 +825,12 @@ function LuckyBlockShopUI.Start()
 			remote.OnClientEvent:Connect(function()
 				openCosmetics()
 			end)
+		end
+
+		-- Close listener: server ZoneTrigger fires CloseCosmeticsShop on exit.
+		local closeCosRemote = remotes:WaitForChild("CloseCosmeticsShop", 5)
+		if closeCosRemote then
+			(closeCosRemote :: RemoteEvent).OnClientEvent:Connect(closeCosmetics)
 		end
 	end
 end

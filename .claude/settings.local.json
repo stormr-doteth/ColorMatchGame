@@ -29,7 +29,23 @@
       "Bash(command -v luau)",
       "Bash(command -v rojo)",
       "WebFetch(domain:dialed.gg)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(xargs grep:*)",
+      "mcp__Roblox_Studio__inspect_instance",
+      "mcp__Roblox_Studio__execute_luau",
+      "Bash(git commit:*)",
+      "Bash(git pull:*)",
+      "WebFetch(domain:www.creation.dev)",
+      "WebFetch(domain:eloboost24.eu)",
+      "WebFetch(domain:games.gg)",
+      "WebFetch(domain:studiokrew.com)",
+      "WebFetch(domain:generalistprogrammer.com)",
+      "mcp__Roblox_Studio__script_search",
+      "mcp__Roblox_Studio__screen_capture",
+      "Bash(sed 's/chairId = \"//')",
+      "Bash(sed 's/\"//')",
+      "Bash(sed 's/id = \"//')"
     ]
   }
 }

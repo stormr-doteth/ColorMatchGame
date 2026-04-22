@@ -83,6 +83,7 @@ function HintShop.Start()
 			localPlayer:SetAttribute("MatchColorActive", true)
 			updateItem2Text()
 			NotificationHud.Show("Match Color activated!")
+			ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UseMatch"):FireServer()
 		else
 			MarketplaceService:PromptProductPurchase(localPlayer, Constants.MATCH_COLOR_PRODUCT_ID)
 		end
@@ -101,6 +102,7 @@ function HintShop.Start()
 			localPlayer:SetAttribute("HintActive", true)
 			updateButtonText()
 			NotificationHud.Show("Hint activated!")
+			ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UseHint"):FireServer()
 		else
 			-- Purchase a hint
 			MarketplaceService:PromptProductPurchase(localPlayer, Constants.HINT_PRODUCT_ID)
@@ -122,6 +124,17 @@ function HintShop.Start()
 		gamepassSpam = spam
 		gamepassSpam.Visible = false
 
+		-- Only Hint (Item1) and Match (Item2) are supported. Hide any extra
+		-- Studio-authored slots (Item3, Item4, ...) so they don't render.
+		for _, child in spam:GetChildren() do
+			if child:IsA("GuiObject") then
+				local n = child.Name
+				if n:sub(1, 4) == "Item" and n ~= "Item1" and n ~= "Item2" then
+					child.Visible = false
+				end
+			end
+		end
+
 		local item1 = spam:WaitForChild("Item1", 5) :: Frame?
 		if not item1 then
 			warn("[HintShop] Item1 not found in GamepassSpam")
@@ -136,6 +149,7 @@ function HintShop.Start()
 			itemLabel.Text = "HINT"
 		end
 		if robuxLabel then
+			robuxLabel.Text = "9"
 			originalRobuxText = robuxLabel.Text
 		end
 
@@ -175,6 +189,9 @@ function HintShop.Start()
 			item2Label = item2:FindFirstChild("ItemLabel") :: TextLabel?
 			item2RobuxLabel = item2:FindFirstChild("RobuxLabel") :: TextLabel?
 			item2Image = item2:FindFirstChild("ItemImage") :: ImageLabel?
+			if item2Image then
+				item2Image.Image = "rbxassetid://122361035967380"
+			end
 			if item2Label then
 				item2Label.Text = "MATCH"
 			end
@@ -259,23 +276,23 @@ function HintShop.Start()
 
 	table.insert(connections, remotes:WaitForChild("MatchEnd").OnClientEvent:Connect(function()
 		currentPhase = "idle"
-		hintCount = 0
-		matchColorCount = 0
-		updateButtonText()
-		updateItem2Text()
 		setVisible(false)
 	end))
 
 	table.insert(connections, remotes:WaitForChild("HintActivated").OnClientEvent:Connect(function()
-		hintCount += 1
-		updateButtonText()
 		NotificationHud.Show("Hint purchased!")
 	end))
 
 	table.insert(connections, remotes:WaitForChild("MatchColorActivated").OnClientEvent:Connect(function()
-		matchColorCount += 1
-		updateItem2Text()
 		NotificationHud.Show("Match Color purchased!")
+	end))
+
+	table.insert(connections, remotes:WaitForChild("PlayerDataUpdate").OnClientEvent:Connect(function(data)
+		if not data then return end
+		hintCount = data.Hints or 0
+		matchColorCount = data.Matches or 0
+		updateButtonText()
+		updateItem2Text()
 	end))
 
 	resolveGui()
