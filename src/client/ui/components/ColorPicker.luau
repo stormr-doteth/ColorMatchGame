@@ -19,6 +19,7 @@ local function VerticalStrip(props: {
 	width: number,
 	onChange: (number) -> (),
 	LayoutOrder: number?,
+	Name: string?,
 })
 	local stripRef = React.useRef(nil :: Instance?)
 	local dragging = React.useRef(false)
@@ -105,6 +106,7 @@ local function VerticalStrip(props: {
 	end, {})
 
 	return e("TextButton", {
+		Name = props.Name or "Strip",
 		Size = UDim2.new(0, props.width, 1, 0),
 		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 		BorderSizePixel = 0,
@@ -210,6 +212,7 @@ local function ColorPicker(props: ColorPickerProps)
 		}),
 
 		HueStrip = e(VerticalStrip, {
+			Name = "HueStrip",
 			gradient = HUE_GRADIENT,
 			value = hue,
 			width = 60,
@@ -218,6 +221,7 @@ local function ColorPicker(props: ColorPickerProps)
 		}),
 
 		SatStrip = e(VerticalStrip, {
+			Name = "SatStrip",
 			gradient = satGradient,
 			value = 1 - sat,
 			width = 60,
@@ -228,6 +232,7 @@ local function ColorPicker(props: ColorPickerProps)
 		}),
 
 		ValStrip = e(VerticalStrip, {
+			Name = "ValStrip",
 			gradient = valGradient,
 			value = 1 - val,
 			width = 60,
