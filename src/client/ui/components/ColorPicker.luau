@@ -1,10 +1,16 @@
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages.React)
 
 local e = React.createElement
+
+-- Gamepad tuning: thumbstick gives smooth drag, D-pad gives discrete nudge.
+local DPAD_STEP = 0.02
+local THUMBSTICK_SPEED = 0.9 -- units per second at full deflection
+local THUMBSTICK_DEADZONE = 0.2
 
 -- Reusable vertical strip with gradient + draggable thumb
 local function VerticalStrip(props: {
@@ -16,6 +22,12 @@ local function VerticalStrip(props: {
 })
 	local stripRef = React.useRef(nil :: Instance?)
 	local dragging = React.useRef(false)
+	local focused = React.useRef(false)
+	-- Latest value/onChange captured in a ref so long-lived Heartbeat/input
+	-- callbacks registered once in useEffect always read current values.
+	local latest = React.useRef({ value = props.value, onChange = props.onChange })
+	latest.current.value = props.value
+	latest.current.onChange = props.onChange
 
 	local function computeValue(inputY: number)
 		local strip = stripRef.current
@@ -55,19 +67,59 @@ local function VerticalStrip(props: {
 			end
 		end)
 
+		-- Gamepad: D-pad up/down = discrete step; left thumbstick Y = continuous.
+		local dpadCon = UserInputService.InputBegan:Connect(function(input, processed)
+			if processed or not focused.current then return end
+			if input.KeyCode == Enum.KeyCode.DPadUp then
+				local v = math.clamp(latest.current.value - DPAD_STEP, 0, 1)
+				latest.current.onChange(v)
+			elseif input.KeyCode == Enum.KeyCode.DPadDown then
+				local v = math.clamp(latest.current.value + DPAD_STEP, 0, 1)
+				latest.current.onChange(v)
+			end
+		end)
+
+		local heartbeatCon = RunService.Heartbeat:Connect(function(dt)
+			if not focused.current then return end
+			local state = UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1)
+			for _, input in state do
+				if input.KeyCode == Enum.KeyCode.Thumbstick1 then
+					local y = input.Position.Y
+					if math.abs(y) > THUMBSTICK_DEADZONE then
+						-- Thumbstick up is +Y; our "value" grows downward, so subtract.
+						local delta = -y * THUMBSTICK_SPEED * dt
+						local v = math.clamp(latest.current.value + delta, 0, 1)
+						latest.current.onChange(v)
+					end
+					break
+				end
+			end
+		end)
+
 		return function()
 			moveCon:Disconnect()
 			endCon:Disconnect()
+			dpadCon:Disconnect()
+			heartbeatCon:Disconnect()
 		end
 	end, {})
 
-	return e("Frame", {
+	return e("TextButton", {
 		Size = UDim2.new(0, props.width, 1, 0),
 		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 		BorderSizePixel = 0,
 		LayoutOrder = props.LayoutOrder,
+		Text = "",
+		AutoButtonColor = false,
+		Selectable = true,
 		ref = function(rbx)
 			stripRef.current = rbx
+		end,
+		[React.Event.SelectionGained] = function()
+			focused.current = true
+		end,
+		[React.Event.SelectionLost] = function()
+			focused.current = false
 		end,
 		[React.Event.InputBegan] = function(_rbx, input)
 			if
