@@ -11,6 +11,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
+local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
 local ChairCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ChairCatalog"))
 
 local GROUP_ID = 626343155
@@ -643,7 +644,7 @@ function RewardsUI.Start()
 				if ok and owns then
 					remotes:WaitForChild("ClaimVIPReward"):FireServer()
 				else
-					MarketplaceService:PromptGamePassPurchase(localPlayer, VIP_PASS_ID)
+					PromptPurchase.GamePass(localPlayer, VIP_PASS_ID)
 				end
 			end
 			claimBtn.Activated:Connect(claim)

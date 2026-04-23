@@ -20,6 +20,7 @@ local LuckyBlockCatalog = require(Shared:WaitForChild("LuckyBlockCatalog"))
 local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
 local ShopCatalog = require(Shared:WaitForChild("ShopCatalog"))
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
+local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
 
 local LuckyBlockShopUI = {}
 
@@ -167,7 +168,7 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 		if pkg.productId and pkg.productId > 0 then
 			tap.Activated:Connect(function()
 				popButton(frame)
-				MarketplaceService:PromptProductPurchase(localPlayer, pkg.productId)
+				PromptPurchase.Product(localPlayer, pkg.productId)
 			end)
 		else
 			tap.Activated:Connect(function()
@@ -194,7 +195,7 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 				if productId > 0 then
 					tap.Activated:Connect(function()
 						popButton(submitFrame)
-						MarketplaceService:PromptProductPurchase(localPlayer, productId)
+						PromptPurchase.Product(localPlayer, productId)
 					end)
 				else
 					local price = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
@@ -324,7 +325,7 @@ local function wireDevProductCard(card: Instance, product)
 	tap.Activated:Connect(function()
 		popButton(submitFrame)
 		if product.productId > 0 then
-			MarketplaceService:PromptProductPurchase(localPlayer, product.productId)
+			PromptPurchase.Product(localPlayer, product.productId)
 		end
 	end)
 end
@@ -343,7 +344,7 @@ local function wireGamePassCard(card: Instance, pass)
 	tap.Activated:Connect(function()
 		popButton(submitFrame)
 		if pass.gamePassId > 0 then
-			MarketplaceService:PromptGamePassPurchase(localPlayer, pass.gamePassId)
+			PromptPurchase.GamePass(localPlayer, pass.gamePassId)
 		end
 	end)
 
@@ -750,7 +751,7 @@ function LuckyBlockShopUI.Start()
 								popButton(cb)
 								local productId = entry.robuxProductId or 0
 								if productId > 0 then
-									MarketplaceService:PromptProductPurchase(localPlayer, productId)
+									PromptPurchase.Product(localPlayer, productId)
 								end
 							end
 							cb.Activated:Connect(onClick)

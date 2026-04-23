@@ -5,6 +5,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local NotificationHud = require(script.Parent:WaitForChild("NotificationHud"))
+local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
 
 local MIN_GUESS_TIME_TO_USE = 3 -- seconds remaining required to use a hint during guessing
 
@@ -85,7 +86,7 @@ function HintShop.Start()
 			NotificationHud.Show("Match Color activated!")
 			ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UseMatch"):FireServer()
 		else
-			MarketplaceService:PromptProductPurchase(localPlayer, Constants.MATCH_COLOR_PRODUCT_ID)
+			PromptPurchase.Product(localPlayer, Constants.MATCH_COLOR_PRODUCT_ID)
 		end
 	end
 
@@ -105,7 +106,7 @@ function HintShop.Start()
 			ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UseHint"):FireServer()
 		else
 			-- Purchase a hint
-			MarketplaceService:PromptProductPurchase(localPlayer, Constants.HINT_PRODUCT_ID)
+			PromptPurchase.Product(localPlayer, Constants.HINT_PRODUCT_ID)
 		end
 	end
 

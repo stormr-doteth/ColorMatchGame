@@ -12,6 +12,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
+local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
 
 local SWAP_OUT = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local SWAP_IN = TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -169,7 +170,7 @@ function GamepassSpamRotator.Start()
 			local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 			if submitBtn then
 				submitBtn.Activated:Connect(function()
-					MarketplaceService:PromptGamePassPurchase(localPlayer, 1796993729)
+					PromptPurchase.GamePass(localPlayer, 1796993729)
 				end)
 			end
 		end
@@ -247,7 +248,7 @@ function GamepassSpamRotator.Start()
 		robuxText = ROBUX_GLYPH .. "49",
 		image = "rbxassetid://128383063987894",
 		onClick = function(player)
-			MarketplaceService:PromptGamePassPurchase(player, 1796710377)
+			PromptPurchase.GamePass(player, 1796710377)
 		end,
 	}
 	local doubleCashItem: PromoItem = {
@@ -255,7 +256,7 @@ function GamepassSpamRotator.Start()
 		robuxText = ROBUX_GLYPH .. "99",
 		image = "rbxassetid://83945987909294",
 		onClick = function(player)
-			MarketplaceService:PromptGamePassPurchase(player, 1797672278)
+			PromptPurchase.GamePass(player, 1797672278)
 		end,
 	}
 	local doubleWinsItem: PromoItem = {
@@ -263,7 +264,7 @@ function GamepassSpamRotator.Start()
 		robuxText = ROBUX_GLYPH .. "99",
 		image = "rbxassetid://106286618566178",
 		onClick = function(player)
-			MarketplaceService:PromptGamePassPurchase(player, 1796963414)
+			PromptPurchase.GamePass(player, 1796963414)
 		end,
 	}
 	local doubleStreakItem: PromoItem = {
@@ -271,7 +272,7 @@ function GamepassSpamRotator.Start()
 		robuxText = ROBUX_GLYPH .. "99",
 		image = "rbxassetid://114192556144330",
 		onClick = function(player)
-			MarketplaceService:PromptGamePassPurchase(player, 1797239408)
+			PromptPurchase.GamePass(player, 1797239408)
 		end,
 	}
 	local glacialBlockItem: PromoItem = {
