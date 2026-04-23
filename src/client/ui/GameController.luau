@@ -540,7 +540,8 @@ local function GameController()
 			if cancelled then return end
 			local hue = pg:FindFirstChild("HueStrip", true)
 			if hue and hue:IsA("GuiObject") then
-				GuiService.SelectedObject = hue
+				local SafeSelect = require(script.Parent:WaitForChild("SafeSelect"))
+				SafeSelect.Set(hue)
 			end
 		end)
 		return function() cancelled = true end

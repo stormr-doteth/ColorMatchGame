@@ -44,8 +44,9 @@ local function openPrompt(saved: Instance?, openFn: () -> (), finishedSignal: RB
 					g.SelectionGroup = true
 				end
 			end
-			if saved and saved:IsDescendantOf(game) and saved:IsA("GuiObject") and saved.Visible then
-				GuiService.SelectedObject = saved
+			if saved and saved:IsDescendantOf(game) and saved:IsA("GuiObject") then
+				local SafeSelect = require(script.Parent:WaitForChild("SafeSelect"))
+				SafeSelect.Set(saved :: GuiObject)
 			end
 		end)
 	end

@@ -302,9 +302,10 @@ function InventoryHud.Start()
 		}):Play()
 		task.delay(BOUNCE_IN.Time, function()
 			isAnimating = false
+			local SafeSelect = require(script.Parent:WaitForChild("ui"):WaitForChild("SafeSelect"))
 			for _, d in inventory:GetDescendants() do
 				if d:IsA("GuiButton") and d.Selectable and d.Visible and d.Active then
-					GuiService.SelectedObject = d
+					SafeSelect.Set(d)
 					break
 				end
 			end

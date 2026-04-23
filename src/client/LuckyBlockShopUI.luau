@@ -22,6 +22,7 @@ local ShopCatalog = require(Shared:WaitForChild("ShopCatalog"))
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
 local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
 local CloseHint = require(script.Parent:WaitForChild("ui"):WaitForChild("CloseHint"))
+local SafeSelect = require(script.Parent:WaitForChild("ui"):WaitForChild("SafeSelect"))
 
 local LuckyBlockShopUI = {}
 
@@ -45,7 +46,7 @@ end
 local function focusInto(root: Instance)
 	if not GuiService.SelectedObject or not GuiService.SelectedObject:IsDescendantOf(root) then
 		local first = findFirstSelectable(root)
-		if first then GuiService.SelectedObject = first end
+		if first then SafeSelect.Set(first) end
 	end
 end
 local function clearFocus(root: Instance)
