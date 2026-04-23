@@ -14,6 +14,15 @@ local TableManager = {}
 local tables = {} -- tableId -> TableState
 local playerToTable = {} -- Player -> tableId
 
+function TableManager.GetMatchForPlayer(player: Player)
+	local tableId = playerToTable[player]
+	if not tableId then
+		return nil
+	end
+	local tableState = tables[tableId]
+	return tableState and tableState.match or nil
+end
+
 -- Lazy remote refs
 local PlayerSeatedRemote
 local LeaveTableRemote

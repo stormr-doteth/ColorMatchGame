@@ -104,7 +104,7 @@ task.spawn(function()
 	noInset.DisplayOrder = screenGui.DisplayOrder
 	noInset.Parent = playerGui
 
-	for _, name in { "ShopButtons", "IngameAds", "GamepassSpam" } do
+	for _, name in { "ShopButtons", "IngameAds", "GamepassSpam", "Shop", "CosmeticsShop", "Inventory", "Rewards" } do
 		local frame = screenGui:WaitForChild(name, 10)
 		if frame then
 			frame.Parent = noInset

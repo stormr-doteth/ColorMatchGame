@@ -389,6 +389,15 @@ function InventoryHud.Start()
 		rerender()
 	end)
 
+	-- Pull the initial snapshot now that OnClientEvent is wired. Without
+	-- this, the server's post-load push can fire before we connect —
+	-- RemoteEvents drop on the receiver if there's no listener yet — and
+	-- the inventory renders empty until the next mutation re-pushes data.
+	local requestRemote = remotes:FindFirstChild("RequestPlayerData")
+	if requestRemote and requestRemote:IsA("RemoteEvent") then
+		requestRemote:FireServer()
+	end
+
 	-- Click ripple effect
 	local rippleGui = Instance.new("ScreenGui")
 	rippleGui.Name = "RippleOverlay"

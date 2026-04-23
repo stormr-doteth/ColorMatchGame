@@ -52,7 +52,6 @@ function MatchController.new(player1: Player, player2: Player, onComplete: () ->
 	self.targetPaper = nil :: BasePart?
 	self.player1Paper = nil :: BasePart?
 	self.player2Paper = nil :: BasePart?
-	self.previewConnection = nil :: RBXScriptConnection?
 
 	-- Per-player score billboards above their heads
 	self.p1Billboard = nil :: BillboardGui?
@@ -160,7 +159,7 @@ function MatchController:CreatePapers()
 		local bb = Instance.new("BillboardGui")
 		bb.Name = "MatchScoreBB"
 		bb.Size = UDim2.new(4, 0, 1.2, 0)
-		bb.StudsOffset = Vector3.new(0, 2.5, 0)
+		bb.StudsOffset = Vector3.new(0, 4.2, 0)
 		bb.AlwaysOnTop = false
 		bb.LightInfluence = 0
 		bb.MaxDistance = 50
@@ -187,29 +186,30 @@ function MatchController:CreatePapers()
 
 	self.p1Billboard, self.p1WinsLabel = makePlayerBillboard(self.player1, 0)
 	self.p2Billboard, self.p2WinsLabel = makePlayerBillboard(self.player2, 0)
+end
 
-	-- Listen to GuessPreview remote for real-time paper color updates
-	self.previewConnection = getRemote("GuessPreview").OnServerEvent:Connect(function(player, data)
-		if typeof(data) ~= "table" then return end
-		if self.finished or self.phase ~= "guessing" then return end
-		local isPlayer1 = player == self.player1
-		local isPlayer2 = player == self.player2
-		if not isPlayer1 and not isPlayer2 then return end
-		-- Once a player has submitted, their preview is locked in.
-		if isPlayer1 and self.player1Guess ~= nil then return end
-		if isPlayer2 and self.player2Guess ~= nil then return end
+-- Called by the global GuessPreview router in RemoteSetup. Returns silently
+-- on any validation failure so stale fires (match ended, wrong phase, already
+-- submitted) are ignored instead of erroring.
+function MatchController:HandleGuessPreview(player: Player, data: any)
+	if typeof(data) ~= "table" then return end
+	if self.finished or self.phase ~= "guessing" then return end
+	local isPlayer1 = player == self.player1
+	local isPlayer2 = player == self.player2
+	if not isPlayer1 and not isPlayer2 then return end
+	if isPlayer1 and self.player1Guess ~= nil then return end
+	if isPlayer2 and self.player2Guess ~= nil then return end
 
-		local h = math.clamp(tonumber(data.h) or 0, 0, 1)
-		local s = math.clamp(tonumber(data.s) or 0, 0, 1)
-		local v = math.clamp(tonumber(data.v) or 0, 0, 1)
-		local color = Color3.fromHSV(h, s, v)
+	local h = math.clamp(tonumber(data.h) or 0, 0, 1)
+	local s = math.clamp(tonumber(data.s) or 0, 0, 1)
+	local v = math.clamp(tonumber(data.v) or 0, 0, 1)
+	local color = Color3.fromHSV(h, s, v)
 
-		if isPlayer1 and self.player1Paper then
-			self.player1Paper.Color = color
-		elseif isPlayer2 and self.player2Paper then
-			self.player2Paper.Color = color
-		end
-	end)
+	if isPlayer1 and self.player1Paper then
+		self.player1Paper.Color = color
+	elseif isPlayer2 and self.player2Paper then
+		self.player2Paper.Color = color
+	end
 end
 
 function MatchController:UpdateTargetPaper()
@@ -282,11 +282,6 @@ function MatchController:ResetPapers()
 end
 
 function MatchController:DestroyPapers()
-	if self.previewConnection then
-		self.previewConnection:Disconnect()
-		self.previewConnection = nil
-	end
-
 	if self.targetPaper then self.targetPaper:Destroy(); self.targetPaper = nil end
 	if self.player1Paper then self.player1Paper:Destroy(); self.player1Paper = nil end
 	if self.player2Paper then self.player2Paper:Destroy(); self.player2Paper = nil end
@@ -416,9 +411,12 @@ function MatchController:StartRound(waitForBegin: boolean?)
 	self.player1Guess = nil
 	self.player2Guess = nil
 
+	-- Clamp S and V away from the extremes so we don't roll near-black
+	-- (low V) or near-white / washed-out (low S, high V) colors, which
+	-- are unfun to guess because sliders barely matter.
 	self.targetH = math.random()
-	self.targetS = math.random()
-	self.targetV = math.random()
+	self.targetS = 0.55 + math.random() * 0.45 -- [0.55, 1.0]
+	self.targetV = 0.45 + math.random() * 0.5  -- [0.45, 0.95]
 
 	self:ResetPapers()
 	self:UpdateTargetPaper()
@@ -730,6 +728,9 @@ function MatchController:EndMatch(winner: Player, loser: Player)
 		local data = ProfileService.GetData(winner)
 		if data then
 			data.WinStreak = (data.WinStreak or 0) + 1
+			-- Replicate via WinStreak attribute + PlayerDataUpdate so the
+			-- over-head StreakHud and any client listeners see the bonus.
+			ProfileService.PushData(winner)
 		end
 		local r = getRemote("BoostAwarded")
 		if r then r:FireClient(winner, "DOUBLE_STREAK", 1) end

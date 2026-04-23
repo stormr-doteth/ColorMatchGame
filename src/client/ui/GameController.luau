@@ -1305,7 +1305,17 @@ local function GameController()
 
 		-- Picker slides in from off-screen left during guessing entry, then
 		-- slides back out to the left when the player submits (submittedAnim).
-		local pickerOffset = (1 - transitionProgress) * -220 - submittedAnim * 220
+		-- SAFETY: once we're actually in the guessing phase the picker MUST be
+		-- on-screen, even if the slide-in animation never completed (we've seen
+		-- mobile clients where transitionProgress got stuck at 0 and the sliders
+		-- rendered invisible off the left edge for the whole round). Clamp the
+		-- negative slide-in contribution to 0 during guessing/submitted so the
+		-- picker at worst pops in instead of never appearing.
+		local slideInOffset = (1 - transitionProgress) * -220
+		if phase == "guessing" or phase == "submitted" then
+			slideInOffset = 0
+		end
+		local pickerOffset = slideInOffset - submittedAnim * 220
 
 		-- Timer text transparency increases during fade
 		local timerTextAlpha = if phase == "showing" then 0.1 else math.min(0.1 + textFade * 0.9, 1)

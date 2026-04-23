@@ -45,7 +45,8 @@
       "mcp__Roblox_Studio__screen_capture",
       "Bash(sed 's/chairId = \"//')",
       "Bash(sed 's/\"//')",
-      "Bash(sed 's/id = \"//')"
+      "Bash(sed 's/id = \"//')",
+      "Bash(git log *)"
     ]
   }
 }

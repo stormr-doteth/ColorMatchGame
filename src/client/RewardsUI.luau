@@ -32,6 +32,29 @@ local PLAYTIME_MILESTONES = {
 
 local RewardsUI = {}
 
+-- Ensure the entire visible area of a claim/reward container is tappable.
+-- Studio-designed ClaimButtons can have a Size that only covers part of the
+-- visible card, leaving mobile players with a tiny real hit region (same
+-- "far-right corner only" symptom fixed in LuckyBlockShopUI). Adding a
+-- transparent full-size TextButton on the container at high ZIndex gives us
+-- a consistent hit region without altering the visual layout. Idempotent —
+-- re-wiring the panel won't stack overlays.
+local function addFullAreaOverlay(parentFrame: GuiObject, name: string): TextButton
+	local existing = parentFrame:FindFirstChild(name)
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local overlay = Instance.new("TextButton")
+	overlay.Name = name
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.BackgroundTransparency = 1
+	overlay.Text = ""
+	overlay.AutoButtonColor = false
+	overlay.ZIndex = 50
+	overlay.Parent = parentFrame
+	return overlay
+end
+
 function RewardsUI.Start()
 	local localPlayer = Players.LocalPlayer
 	local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -372,7 +395,7 @@ function RewardsUI.Start()
 	for i, frame in dailyFrames do
 		local claimBtn = frame:FindFirstChild("ClaimButton") :: TextButton?
 		if claimBtn then
-			claimBtn.Activated:Connect(function()
+			local claim = function()
 				if not dailyData or not dailyData.canClaim then return end
 				local streak = dailyData.currentStreak or 0
 				local pending = (streak % #dailyFrames) + 1
@@ -381,7 +404,9 @@ function RewardsUI.Start()
 				dailyData.canClaim = false
 				dailyData.currentStreak = streak + 1
 				updateDailyUI()
-			end)
+			end
+			claimBtn.Activated:Connect(claim)
+			addFullAreaOverlay(frame, "TapArea").Activated:Connect(claim)
 		end
 	end
 
@@ -466,14 +491,16 @@ function RewardsUI.Start()
 	for _, entry in playtimeFrames do
 		local claimBtn = entry.frame:FindFirstChild("ClaimButton") :: TextButton?
 		if claimBtn then
-			claimBtn.Activated:Connect(function()
+			local claim = function()
 				local elapsed = os.clock() - joinTime
 				if elapsed >= entry.seconds and not playtimeClaimed[entry.id] then
 					remotes:WaitForChild("ClaimPlaytimeReward"):FireServer(entry.id)
 					playtimeClaimed[entry.id] = true
 					updatePlaytimeUI()
 				end
-			end)
+			end
+			claimBtn.Activated:Connect(claim)
+			addFullAreaOverlay(entry.frame, "TapArea").Activated:Connect(claim)
 		end
 	end
 
@@ -526,11 +553,15 @@ function RewardsUI.Start()
 	if groupPanel then
 		local claimBtn = groupPanel:FindFirstChild("ClaimButton") :: TextButton?
 		if claimBtn then
-			claimBtn.Activated:Connect(function()
+			local claim = function()
 				if not groupClaimed then
 					remotes:WaitForChild("ClaimGroupReward"):FireServer()
 				end
-			end)
+			end
+			claimBtn.Activated:Connect(claim)
+			-- Child overlay: guarantees this button wins input even if another
+			-- decorative sibling has a higher ZIndex with Active = true.
+			addFullAreaOverlay(claimBtn, "TapArea").Activated:Connect(claim)
 		end
 
 		local grf = groupPanel:FindFirstChild("GroupRewardFrame")
@@ -589,7 +620,7 @@ function RewardsUI.Start()
 	if vipPanel then
 		local claimBtn = vipPanel:FindFirstChild("ClaimButton") :: TextButton?
 		if claimBtn then
-			claimBtn.Activated:Connect(function()
+			local claim = function()
 				if vipClaimed then return end
 				local ok, owns = pcall(function()
 					return MarketplaceService:UserOwnsGamePassAsync(localPlayer.UserId, VIP_PASS_ID)
@@ -599,7 +630,9 @@ function RewardsUI.Start()
 				else
 					MarketplaceService:PromptGamePassPurchase(localPlayer, VIP_PASS_ID)
 				end
-			end)
+			end
+			claimBtn.Activated:Connect(claim)
+			addFullAreaOverlay(claimBtn, "TapArea").Activated:Connect(claim)
 		end
 
 		local grf = vipPanel:FindFirstChild("GroupRewardFrame")

@@ -127,6 +127,14 @@ local function releaseProfile(player)
 	end
 end
 
+-- Push the player's current profile to their client on demand. Used by the
+-- client-initiated RequestPlayerData sync so late-starting HUDs (inventory,
+-- cash, wins) can pull the initial snapshot instead of racing the server's
+-- post-load push.
+function ProfileService.PushData(player: Player)
+	notify(player)
+end
+
 function ProfileService.GetProfile(player)
 	return activeProfiles[player]
 end

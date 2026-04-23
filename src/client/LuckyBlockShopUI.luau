@@ -67,6 +67,30 @@ local function setupViewport(viewport: ViewportFrame, model: Model, zoom: number
 	viewport.BackgroundTransparency = 1
 end
 
+-- Ensure the entire visible area of a purchase Frame is tappable. The
+-- Studio-designed templates ship a nested TextButton whose Size/Position
+-- only covers part of the visual button, which on mobile leaves big "dead
+-- zones" where a finger press hits nothing (symptom: only the far-right
+-- corner seems to work). Overlaying a transparent full-size TextButton
+-- with a higher ZIndex than the nested one gives us a consistent hit
+-- region without disturbing the template's visual layout. Mirrors the
+-- pattern already in HintShop.luau:176.
+local function addFullAreaOverlay(parentFrame: GuiObject, name: string): TextButton
+	local existing = parentFrame:FindFirstChild(name)
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local overlay = Instance.new("TextButton")
+	overlay.Name = name
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.BackgroundTransparency = 1
+	overlay.Text = ""
+	overlay.AutoButtonColor = false
+	overlay.ZIndex = 50
+	overlay.Parent = parentFrame
+	return overlay
+end
+
 local function popButton(btn: GuiObject)
 	local origSize = btn.Size
 	TweenService:Create(btn, TweenInfo.new(0.06), {
@@ -110,13 +134,14 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 	local function wirePackageButton(frame: Frame, pkg)
 		local submitBtn = frame:FindFirstChild("SubmitButton") :: TextButton?
 		if not submitBtn then return end
+		local tap = addFullAreaOverlay(frame, "TapArea")
 		if pkg.productId and pkg.productId > 0 then
-			submitBtn.Activated:Connect(function()
+			tap.Activated:Connect(function()
 				popButton(frame)
 				MarketplaceService:PromptProductPurchase(localPlayer, pkg.productId)
 			end)
 		else
-			submitBtn.Activated:Connect(function()
+			tap.Activated:Connect(function()
 				popButton(frame)
 				warn(`[LuckyBlockShop] No productId set for {entry.id} x{pkg.quantity}`)
 			end)
@@ -135,16 +160,17 @@ local function wireBlockCard(card: Frame, entry, purchaseRemote: RemoteEvent)
 		if submitFrame then
 			local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 			if submitBtn then
+				local tap = addFullAreaOverlay(submitFrame, "TapArea")
 				local productId = entry.robuxProductId or 0
 				if productId > 0 then
-					submitBtn.Activated:Connect(function()
+					tap.Activated:Connect(function()
 						popButton(submitFrame)
 						MarketplaceService:PromptProductPurchase(localPlayer, productId)
 					end)
 				else
 					local price = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
 					submitBtn.Text = ROBUX_ICON .. " " .. tostring(price)
-					submitBtn.Activated:Connect(function()
+					tap.Activated:Connect(function()
 						popButton(submitFrame)
 						local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
 						purchaseRemote:FireServer(entry.id, qty)
@@ -265,7 +291,8 @@ local function wireDevProductCard(card: Instance, product)
 	local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 	if not submitBtn then return end
 
-	submitBtn.Activated:Connect(function()
+	local tap = addFullAreaOverlay(submitFrame, "TapArea")
+	tap.Activated:Connect(function()
 		popButton(submitFrame)
 		if product.productId > 0 then
 			MarketplaceService:PromptProductPurchase(localPlayer, product.productId)
@@ -283,7 +310,8 @@ local function wireGamePassCard(card: Instance, pass)
 	local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 	if not submitBtn then return end
 
-	submitBtn.Activated:Connect(function()
+	local tap = addFullAreaOverlay(submitFrame, "TapArea")
+	tap.Activated:Connect(function()
 		popButton(submitFrame)
 		if pass.gamePassId > 0 then
 			MarketplaceService:PromptGamePassPurchase(localPlayer, pass.gamePassId)
@@ -656,7 +684,11 @@ function LuckyBlockShopUI.Start()
 				local cashPrice = if #entry.buyOptions > 0 then entry.buyOptions[1].price else 0
 				local qty = if #entry.buyOptions > 0 then entry.buyOptions[1].quantity else 1
 
-				-- Wire RobuxButtons (cash + Robux)
+				-- Wire RobuxButtons (cash + Robux). RobuxButton is itself a
+				-- TextButton, so its own Size defines the hit region — but we
+				-- still add a child overlay so that if any sibling decoration
+				-- has a higher ZIndex with Active = true, touches on the
+				-- visible button still register.
 				for _, child in card:GetChildren() do
 					if child:IsA("TextButton") and child.Name == "RobuxButton" then
 						local rl = child:FindFirstChild("robuxLabel") :: TextLabel?
@@ -665,22 +697,28 @@ function LuckyBlockShopUI.Start()
 						if rl.Text:match("%$") then
 							-- Cash buy button
 							rl.Text = "$" .. tostring(cashPrice)
-							child.Activated:Connect(function()
-								popButton(child)
+							local cb = child
+							local onClick = function()
+								popButton(cb)
 								cosPurchaseRemote:FireServer(entry.id, qty)
-							end)
+							end
+							cb.Activated:Connect(onClick)
+							addFullAreaOverlay(cb, "TapArea").Activated:Connect(onClick)
 						else
 							-- Robux buy button — Roblox Robux glyph + price
 							if entry.robuxPrice then
 								rl.Text = utf8.char(0xE002) .. tostring(entry.robuxPrice)
 							end
-							child.Activated:Connect(function()
-								popButton(child)
+							local cb = child
+							local onClick = function()
+								popButton(cb)
 								local productId = entry.robuxProductId or 0
 								if productId > 0 then
 									MarketplaceService:PromptProductPurchase(localPlayer, productId)
 								end
-							end)
+							end
+							cb.Activated:Connect(onClick)
+							addFullAreaOverlay(cb, "TapArea").Activated:Connect(onClick)
 						end
 					end
 				end
@@ -691,7 +729,8 @@ function LuckyBlockShopUI.Start()
 					local submitBtn = submitFrame:FindFirstChild("SubmitButton") :: TextButton?
 					if submitBtn then
 						submitBtn.Text = "$" .. tostring(cashPrice)
-						submitBtn.Activated:Connect(function()
+						local tap = addFullAreaOverlay(submitFrame, "TapArea")
+						tap.Activated:Connect(function()
 							popButton(submitFrame)
 							cosPurchaseRemote:FireServer(entry.id, qty)
 						end)

@@ -149,7 +149,7 @@ function HintShop.Start()
 			itemLabel.Text = "HINT"
 		end
 		if robuxLabel then
-			robuxLabel.Text = "9"
+			robuxLabel.Text = utf8.char(0xE002) .. " 9"
 			originalRobuxText = robuxLabel.Text
 		end
 

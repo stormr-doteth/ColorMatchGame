@@ -247,6 +247,30 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gameP
 	end
 end)
 
+-- Client-initiated initial profile sync. The server also pushes PlayerDataUpdate
+-- on profile load, but some client HUDs (InventoryHud in particular) do long
+-- WaitForChild chains before connecting OnClientEvent and can miss that first
+-- push — RemoteEvents don't queue on the receiver side. Having the client pull
+-- once it's actually ready closes the race.
+RemoteSetup.Get("RequestPlayerData").OnServerEvent:Connect(function(player)
+	if not RateLimit.check("RequestPlayerData", player, 0.5) then return end
+	if ProfileService.GetData(player) then
+		ProfileService.PushData(player)
+	end
+end)
+
+-- Global GuessPreview router. The listener lives for the lifetime of the
+-- server so FireServer calls never hit an unconnected remote (which would
+-- queue and eventually "exhaust"). The current match is resolved per-fire
+-- from TableManager; solo players and between-match fires are silently
+-- ignored by the absence of a match.
+RemoteSetup.Get("GuessPreview").OnServerEvent:Connect(function(player, data)
+	local match = TableManager.GetMatchForPlayer(player)
+	if match and match.HandleGuessPreview then
+		match:HandleGuessPreview(player, data)
+	end
+end)
+
 -- Use hint / match: decrement persistent inventory. Client fires optimistically
 -- on use; server is the source of truth for the count.
 RemoteSetup.Get("UseHint").OnServerEvent:Connect(function(player)

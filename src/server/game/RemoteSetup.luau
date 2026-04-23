@@ -13,6 +13,7 @@ local REMOTE_NAMES = {
 	"RestartSolo",
 	"BeginRound",
 	"PlayerDataUpdate",
+	"RequestPlayerData",
 	"PurchaseChair",
 	"EquipChair",
 	"ShowNotification",

@@ -5,21 +5,20 @@
 -- profile in ProfileService.
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
 local StreakHud = {}
 
-local REFERENCE_DISTANCE = 18
-local BASE_SIZE_X = 140
-local BASE_SIZE_Y = 56
-local MIN_SCALE = 0.25
-local MAX_SCALE = 1.4
+-- Studs-based size so the HUD scales with world distance like every other
+-- billboard in the game (see MatchController:makePlayerBillboard). Pixel
+-- sizing rendered proportionally huge on mobile because the same pixel
+-- count covers a much smaller perceived world.
+local SIZE_STUDS_X = 4
+local SIZE_STUDS_Y = 1.6
 
 type Entry = {
 	billboard: BillboardGui,
 	label: TextLabel,
 	headConn: RBXScriptConnection?,
-	renderConn: RBXScriptConnection?,
 	head: BasePart,
 }
 
@@ -29,7 +28,6 @@ local function destroy(player: Player)
 	local entry = active[player]
 	if not entry then return end
 	if entry.headConn then entry.headConn:Disconnect() end
-	if entry.renderConn then entry.renderConn:Disconnect() end
 	if entry.billboard then entry.billboard:Destroy() end
 	active[player] = nil
 end
@@ -38,7 +36,7 @@ local function buildBillboard(head: BasePart, streak: number): (BillboardGui, Te
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "WinStreakHud"
 	bb.Adornee = head
-	bb.Size = UDim2.fromOffset(BASE_SIZE_X, BASE_SIZE_Y)
+	bb.Size = UDim2.new(SIZE_STUDS_X, 0, SIZE_STUDS_Y, 0)
 	bb.StudsOffset = Vector3.new(0, 2.6, 0)
 	bb.AlwaysOnTop = true
 	bb.MaxDistance = 120
@@ -95,14 +93,6 @@ local function refresh(player: Player)
 		head = head,
 		headConn = head.AncestryChanged:Connect(function(_, parent)
 			if parent == nil then destroy(player) end
-		end),
-		renderConn = RunService.RenderStepped:Connect(function()
-			if not bb.Parent then return end
-			local camera = workspace.CurrentCamera
-			if not camera then return end
-			local distance = (camera.CFrame.Position - head.Position).Magnitude
-			local scale = math.clamp(REFERENCE_DISTANCE / math.max(distance, 0.01), MIN_SCALE, MAX_SCALE)
-			bb.Size = UDim2.fromOffset(BASE_SIZE_X * scale, BASE_SIZE_Y * scale)
 		end),
 	}
 	active[player] = entryRef
