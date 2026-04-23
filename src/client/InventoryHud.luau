@@ -360,6 +360,10 @@ function InventoryHud.Start()
 	if closeButton and closeButton:IsA("GuiButton") then
 		closeButton.Activated:Connect(closeInventory)
 	end
+	if header then
+		local CloseHint = require(script.Parent:WaitForChild("ui"):WaitForChild("CloseHint"))
+		CloseHint.Attach(header)
+	end
 
 	-- Rendering
 	local latestData: any = nil

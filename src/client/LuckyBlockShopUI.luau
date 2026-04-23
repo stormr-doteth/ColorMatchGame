@@ -21,6 +21,7 @@ local ChairCatalog = require(Shared:WaitForChild("ChairCatalog"))
 local ShopCatalog = require(Shared:WaitForChild("ShopCatalog"))
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
 local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
+local CloseHint = require(script.Parent:WaitForChild("ui"):WaitForChild("CloseHint"))
 
 local LuckyBlockShopUI = {}
 
@@ -118,6 +119,20 @@ local function addFullAreaOverlay(parentFrame: GuiObject, name: string): TextBut
 	-- purchase buttons.
 	overlay.Selectable = true
 	overlay.Parent = parentFrame
+	-- If the parent is itself a GuiButton, it's natively selectable. With an
+	-- overlay on top, controller nav would otherwise land on BOTH — doubling
+	-- the number of focusable cards. Hide the parent from selection.
+	if parentFrame:IsA("GuiButton") then
+		parentFrame.Selectable = false
+	end
+	-- Also hide any nested GuiButtons (decorative SubmitButton/TextButton
+	-- shipped with Studio templates) so scrolling a grid only lands once per
+	-- card, on our overlay.
+	for _, d in parentFrame:GetDescendants() do
+		if d ~= overlay and d:IsA("GuiButton") then
+			d.Selectable = false
+		end
+	end
 	return overlay
 end
 
@@ -488,6 +503,7 @@ local function buildShop(shopFrame: Frame)
 	-- Close button
 	local header = shopFrame:FindFirstChild("Header") :: Frame?
 	if header then
+		CloseHint.Attach(header)
 		local closeBtn = header:FindFirstChild("CloseButton")
 		if closeBtn and closeBtn:IsA("GuiButton") then
 			closeBtn.Activated:Connect(function()
@@ -893,6 +909,7 @@ function LuckyBlockShopUI.Start()
 		-- Close button inside CosmeticsShop
 		local cosHeader = cosmeticsShop:FindFirstChild("Header") :: Frame?
 		if cosHeader then
+			CloseHint.Attach(cosHeader)
 			local closeBtn = cosHeader:FindFirstChild("CloseButton")
 			if closeBtn and closeBtn:IsA("GuiButton") then
 				closeBtn.Activated:Connect(closeCosmetics)

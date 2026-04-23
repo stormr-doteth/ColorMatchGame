@@ -15,40 +15,69 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local PromptPurchase = {}
 
-local function restoreSelection(saved: Instance?)
-	task.delay(0.1, function()
-		if saved and saved:IsDescendantOf(game) then
-			if saved:IsA("GuiObject") and saved.Visible then
+-- Walk up from `from` collecting every ancestor GuiObject with
+-- SelectionGroup = true. We temporarily clear them so CoreGui's PurchasePrompt
+-- can grab gamepad focus; re-set on restore.
+local function collectSelectionGroups(from: Instance?): { GuiObject }
+	local groups: { GuiObject } = {}
+	local cur = from
+	while cur and cur ~= game do
+		if cur:IsA("GuiObject") and cur.SelectionGroup then
+			table.insert(groups, cur)
+		end
+		cur = cur.Parent
+	end
+	return groups
+end
+
+local function openPrompt(saved: Instance?, openFn: () -> (), finishedSignal: RBXScriptSignal, match: (any, any) -> boolean)
+	local releasedGroups = collectSelectionGroups(saved)
+	for _, g in releasedGroups do
+		g.SelectionGroup = false
+	end
+	GuiService.SelectedObject = nil
+
+	local function restore()
+		task.delay(0.1, function()
+			for _, g in releasedGroups do
+				if g and g:IsDescendantOf(game) then
+					g.SelectionGroup = true
+				end
+			end
+			if saved and saved:IsDescendantOf(game) and saved:IsA("GuiObject") and saved.Visible then
 				GuiService.SelectedObject = saved
 			end
-		end
+		end)
+	end
+
+	local conn
+	conn = finishedSignal:Connect(function(a, b)
+		if not match(a, b) then return end
+		conn:Disconnect()
+		restore()
 	end)
+
+	openFn()
 end
 
 function PromptPurchase.Product(player: Player, productId: number)
 	local saved = GuiService.SelectedObject
-	GuiService.SelectedObject = nil
-	local conn
-	-- PromptProductPurchaseFinished: (userId: number, productId: number, wasPurchased: boolean)
-	conn = MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, id)
-		if userId ~= player.UserId or id ~= productId then return end
-		conn:Disconnect()
-		restoreSelection(saved)
-	end)
-	MarketplaceService:PromptProductPurchase(player, productId)
+	openPrompt(
+		saved,
+		function() MarketplaceService:PromptProductPurchase(player, productId) end,
+		MarketplaceService.PromptProductPurchaseFinished,
+		function(userId, id) return userId == player.UserId and id == productId end
+	)
 end
 
 function PromptPurchase.GamePass(player: Player, gamePassId: number)
 	local saved = GuiService.SelectedObject
-	GuiService.SelectedObject = nil
-	local conn
-	-- PromptGamePassPurchaseFinished: (player: Player, gamePassId: number, wasPurchased: boolean)
-	conn = MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(finishedPlayer, id)
-		if finishedPlayer ~= player or id ~= gamePassId then return end
-		conn:Disconnect()
-		restoreSelection(saved)
-	end)
-	MarketplaceService:PromptGamePassPurchase(player, gamePassId)
+	openPrompt(
+		saved,
+		function() MarketplaceService:PromptGamePassPurchase(player, gamePassId) end,
+		MarketplaceService.PromptGamePassPurchaseFinished,
+		function(finishedPlayer, id) return finishedPlayer == player and id == gamePassId end
+	)
 end
 
 return PromptPurchase

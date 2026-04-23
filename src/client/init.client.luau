@@ -51,6 +51,7 @@ end
 task.spawn(disableResetButton)
 localPlayer.CharacterAdded:Connect(disableResetButton)
 
+require(script:WaitForChild("UIManager")).BindControllerClose()
 TopBar.Start()
 CashHud.Start()
 WinsHud.Start()

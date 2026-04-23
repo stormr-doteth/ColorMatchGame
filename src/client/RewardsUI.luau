@@ -12,6 +12,7 @@ local Workspace = game:GetService("Workspace")
 
 local UIManager = require(script.Parent:WaitForChild("UIManager"))
 local PromptPurchase = require(script.Parent:WaitForChild("ui"):WaitForChild("PromptPurchase"))
+local CloseHint = require(script.Parent:WaitForChild("ui"):WaitForChild("CloseHint"))
 local ChairCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ChairCatalog"))
 
 local GROUP_ID = 626343155
@@ -303,6 +304,7 @@ function RewardsUI.Start()
 
 	-- Close button
 	if header then
+		CloseHint.Attach(header)
 		local closeBtn = header:FindFirstChild("CloseButton") :: ImageButton?
 		if closeBtn then
 			closeBtn.Activated:Connect(closeRewards)
