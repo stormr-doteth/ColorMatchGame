@@ -48,12 +48,39 @@ end
 -- load and after every cash/win mutation so the HUD reflects reality. Also
 -- mirrors the win streak onto a Player attribute so it replicates to all
 -- clients (used for the over-head streak BillboardGui).
+-- Maintain the classic Roblox leaderstats folder (top-right playerlist).
+-- IntValues are created lazily on the first notify after profile load and
+-- mirrored on every subsequent mutation.
+local function syncLeaderstats(player: Player, data)
+	local folder = player:FindFirstChild("leaderstats")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "leaderstats"
+		folder.Parent = player
+	end
+	local wins = folder:FindFirstChild("Wins")
+	if not wins then
+		wins = Instance.new("IntValue")
+		wins.Name = "Wins"
+		wins.Parent = folder
+	end
+	local cash = folder:FindFirstChild("Cash")
+	if not cash then
+		cash = Instance.new("IntValue")
+		cash.Name = "Cash"
+		cash.Parent = folder
+	end
+	wins.Value = data.Wins or 0
+	cash.Value = data.Cash or 0
+end
+
 local function notify(player: Player)
 	local profile = activeProfiles[player]
 	if not profile then
 		return
 	end
 	player:SetAttribute("WinStreak", profile.Data.WinStreak or 0)
+	syncLeaderstats(player, profile.Data)
 	local remote = getPlayerDataUpdateRemote()
 	if not remote then
 		return

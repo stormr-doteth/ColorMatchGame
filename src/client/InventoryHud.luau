@@ -1,6 +1,7 @@
 -- InventoryHud
 -- Shows owned chairs in a grid. Click to equip/unequip.
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -199,6 +200,7 @@ local function buildItem(template: Frame, entry, index: number, isEquipped: bool
 		clickOverlay.Text = ""
 		clickOverlay.AutoButtonColor = false
 		clickOverlay.ZIndex = 10
+		clickOverlay.Selectable = true
 		clickOverlay.Parent = item
 	end
 	clickOverlay.Activated:Connect(function()
@@ -240,8 +242,10 @@ function InventoryHud.Start()
 	if body then
 		local gridLayout = body:FindFirstChildOfClass("UIGridLayout")
 		if gridLayout then
-			gridLayout.CellSize = UDim2.new(0.22, 0, 0, 160)
-			gridLayout.CellPadding = UDim2.new(0.012, 0, 0, 14)
+			-- All scale-based so rows stay proportional on mobile (pixel-based
+			-- vertical cell size was producing huge empty rows on phones).
+			gridLayout.CellSize = UDim2.new(0.22, 0, 0.28, 0)
+			gridLayout.CellPadding = UDim2.new(0.012, 0, 0.02, 0)
 			gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 		end
 		local bodyPadding = body:FindFirstChildOfClass("UIPadding")
@@ -286,6 +290,7 @@ function InventoryHud.Start()
 		UIManager.CloseOthers("Inventory")
 		isAnimating = true
 		inventory.Visible = true
+		inventory.SelectionGroup = true
 		inventory.Size = UDim2.new(
 			invOpenSize.X.Scale * 0.7, invOpenSize.X.Offset * 0.7,
 			invOpenSize.Y.Scale * 0.7, invOpenSize.Y.Offset * 0.7
@@ -295,7 +300,15 @@ function InventoryHud.Start()
 			Size = invOpenSize,
 			BackgroundTransparency = invOrigTransparency,
 		}):Play()
-		task.delay(BOUNCE_IN.Time, function() isAnimating = false end)
+		task.delay(BOUNCE_IN.Time, function()
+			isAnimating = false
+			for _, d in inventory:GetDescendants() do
+				if d:IsA("GuiButton") and d.Selectable and d.Visible and d.Active then
+					GuiService.SelectedObject = d
+					break
+				end
+			end
+		end)
 	end
 
 	local function closeInventory()
@@ -314,6 +327,10 @@ function InventoryHud.Start()
 			inventory.Size = invOpenSize
 			inventory.BackgroundTransparency = invOrigTransparency
 			isAnimating = false
+			local sel = GuiService.SelectedObject
+			if sel and sel:IsDescendantOf(inventory) then
+				GuiService.SelectedObject = nil
+			end
 		end)
 	end
 
@@ -333,6 +350,7 @@ function InventoryHud.Start()
 			overlay.BackgroundTransparency = 1
 			overlay.Text = ""
 			overlay.ZIndex = 10
+			overlay.Selectable = true
 			overlay.Parent = inventoryButton
 			target = overlay
 		end

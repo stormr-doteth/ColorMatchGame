@@ -2,6 +2,7 @@
 -- Wires the manually-designed Rewards panel: Daily, Playtime, Group, VIP tabs.
 -- Uses the same bounce tween as the Shop panel for open/close.
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -51,6 +52,7 @@ local function addFullAreaOverlay(parentFrame: GuiObject, name: string): TextBut
 	overlay.Text = ""
 	overlay.AutoButtonColor = false
 	overlay.ZIndex = 50
+	overlay.Selectable = true
 	overlay.Parent = parentFrame
 	return overlay
 end
@@ -255,11 +257,20 @@ function RewardsUI.Start()
 			targetSize.Y.Scale * 0.7, targetSize.Y.Offset * 0.7
 		)
 		rewardsFrame.Visible = true
+		rewardsFrame.SelectionGroup = true
 		TweenService:Create(rewardsFrame, BOUNCE_IN, { Size = targetSize }):Play()
 
 		isVisible = true
 		showTab("daily")
-		task.delay(BOUNCE_IN.Time, function() isAnimating = false end)
+		task.delay(BOUNCE_IN.Time, function()
+			isAnimating = false
+			for _, d in rewardsFrame:GetDescendants() do
+				if d:IsA("GuiButton") and d.Selectable and d.Visible and d.Active then
+					GuiService.SelectedObject = d
+					break
+				end
+			end
+		end)
 	end
 
 	local function closeRewards()
@@ -278,6 +289,10 @@ function RewardsUI.Start()
 			rewardsFrame.Size = targetSize
 			isVisible = false
 			isAnimating = false
+			local sel = GuiService.SelectedObject
+			if sel and sel:IsDescendantOf(rewardsFrame) then
+				GuiService.SelectedObject = nil
+			end
 		end)
 	end
 

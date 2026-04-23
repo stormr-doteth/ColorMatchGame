@@ -7,6 +7,7 @@
 --   • Handles open/close with bouncy tweens
 --   • Checks gamepass ownership and shows "Owned"
 
+local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +28,30 @@ local localPlayer = Players.LocalPlayer
 local BOUNCE_IN = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local BOUNCE_OUT = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 local ROBUX_ICON = utf8.char(0xE002)
+
+-- Controller focus: set SelectedObject to the first selectable descendant so
+-- Xbox/PS5 users land inside the panel when it opens. Clearing on close so
+-- the cursor doesn't get stranded on a hidden button.
+local function findFirstSelectable(root: Instance): GuiObject?
+	for _, d in root:GetDescendants() do
+		if d:IsA("GuiButton") and d.Selectable and d.Visible and d.Active then
+			return d
+		end
+	end
+	return nil
+end
+local function focusInto(root: Instance)
+	if not GuiService.SelectedObject or not GuiService.SelectedObject:IsDescendantOf(root) then
+		local first = findFirstSelectable(root)
+		if first then GuiService.SelectedObject = first end
+	end
+end
+local function clearFocus(root: Instance)
+	local sel = GuiService.SelectedObject
+	if sel and sel:IsDescendantOf(root) then
+		GuiService.SelectedObject = nil
+	end
+end
 
 ---------------------------------------------------------------------------
 -- Helpers
@@ -87,6 +112,10 @@ local function addFullAreaOverlay(parentFrame: GuiObject, name: string): TextBut
 	overlay.Text = ""
 	overlay.AutoButtonColor = false
 	overlay.ZIndex = 50
+	-- Selectable = true exposes the overlay to controller D-pad navigation
+	-- (GuiService.SelectedObject). Without it, Xbox/PS5 users can't reach
+	-- purchase buttons.
+	overlay.Selectable = true
 	overlay.Parent = parentFrame
 	return overlay
 end
@@ -488,10 +517,14 @@ function LuckyBlockShopUI.Open(focusBlockId: string?)
 		targetSize.Y.Scale * 0.7, targetSize.Y.Offset * 0.7
 	)
 	shopFrame.Visible = true
+	shopFrame.SelectionGroup = true
 	TweenService:Create(shopFrame, BOUNCE_IN, { Size = targetSize }):Play()
 
 	isVisible = true
-	task.delay(BOUNCE_IN.Time, function() isAnimating = false end)
+	task.delay(BOUNCE_IN.Time, function()
+		isAnimating = false
+		focusInto(shopFrame)
+	end)
 
 	-- Auto-scroll: legendary block lives at the bottom of the Body scrolling
 	-- frame, so when it's the focus, jump the scroll to max Y once layout
@@ -525,6 +558,7 @@ function LuckyBlockShopUI.Close()
 		shopFrame.Size = targetSize
 		isVisible = false
 		isAnimating = false
+		clearFocus(shopFrame)
 	end)
 end
 
@@ -577,9 +611,11 @@ function LuckyBlockShopUI.Start()
 					overlay.BackgroundTransparency = 1
 					overlay.Text = ""
 					overlay.ZIndex = 10
+					overlay.Selectable = true
 					overlay.Parent = child
 				end
 				local btn = overlay :: TextButton
+				btn.Selectable = true
 				btn.Activated:Connect(function()
 					LuckyBlockShopUI.Toggle()
 				end)
@@ -815,9 +851,13 @@ function LuckyBlockShopUI.Start()
 				targetSize.Y.Scale * 0.85, targetSize.Y.Offset * 0.85
 			)
 			cosmeticsShop.Visible = true
+			cosmeticsShop.SelectionGroup = true
 			TweenService:Create(cosmeticsShop, COSMETICS_OPEN, { Size = targetSize }):Play()
 			cosmeticsVisible = true
-			task.delay(COSMETICS_OPEN.Time, function() cosmeticsAnimating = false end)
+			task.delay(COSMETICS_OPEN.Time, function()
+				cosmeticsAnimating = false
+				focusInto(cosmeticsShop)
+			end)
 		end
 
 		local function closeCosmetics()
@@ -835,6 +875,7 @@ function LuckyBlockShopUI.Start()
 				cosmeticsShop.Size = targetSize
 				cosmeticsVisible = false
 				cosmeticsAnimating = false
+				clearFocus(cosmeticsShop)
 			end)
 		end
 

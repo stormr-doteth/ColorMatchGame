@@ -179,6 +179,7 @@ function HintShop.Start()
 		clickButton.BackgroundTransparency = 1
 		clickButton.Text = ""
 		clickButton.ZIndex = 10
+		clickButton.Selectable = true
 		clickButton.Parent = item1
 
 		table.insert(connections, clickButton.Activated:Connect(onItem1Clicked))
@@ -224,6 +225,7 @@ function HintShop.Start()
 			click2.BackgroundTransparency = 1
 			click2.Text = ""
 			click2.ZIndex = 10
+			click2.Selectable = true
 			click2.Parent = item2
 
 			table.insert(connections, click2.Activated:Connect(onItem2Clicked))

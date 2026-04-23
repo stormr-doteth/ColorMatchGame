@@ -72,9 +72,21 @@ local function refresh(player: Player)
 		destroy(player)
 		return
 	end
+	-- On fresh joins the character may be parented before Head has streamed
+	-- in. Waiting here (instead of bailing) prevents a race where the player
+	-- already has a streak but the billboard only appears after the next
+	-- WinStreak attribute change.
 	local head = character:FindFirstChild("Head")
+	if not head then
+		local waited = character:WaitForChild("Head", 5)
+		head = waited
+	end
 	if not head or not head:IsA("BasePart") then
 		destroy(player)
+		return
+	end
+	-- Character may have swapped while we were waiting.
+	if player.Character ~= character then
 		return
 	end
 
@@ -106,7 +118,7 @@ local function watchPlayer(player: Player)
 		task.defer(function() refresh(player) end)
 	end)
 	if player.Character then
-		refresh(player)
+		task.spawn(refresh, player)
 	end
 end
 
