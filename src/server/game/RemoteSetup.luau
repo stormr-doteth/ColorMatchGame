@@ -41,6 +41,11 @@ local REMOTE_NAMES = {
 	"WinsLeaderboardUpdate",
 	"StreakLeaderboardUpdate",
 	"SubmitFeedback",
+	"GiftLuckyBlock",
+	"LuckyBlockGiftReceived",
+	"OpenFeedback",
+	"CloseFeedback",
+	"DevGrantLuckyBlock",
 }
 
 local RemoteSetup = {}

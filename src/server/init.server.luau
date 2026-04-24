@@ -46,7 +46,7 @@ Analytics.Init()
 PolicyGate.Init()
 
 -- Default walk speed
-local DEFAULT_WALK_SPEED = 30
+local DEFAULT_WALK_SPEED = 24
 local function applyWalkSpeed(character: Model)
 	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
 	if humanoid then
@@ -64,7 +64,19 @@ local function grantPassChairs(player: Player)
 	end)
 end
 
+local function lockLandscape(player: Player)
+	task.spawn(function()
+		local pg = player:WaitForChild("PlayerGui", 10)
+		if pg then
+			pcall(function()
+				pg.ScreenOrientation = Enum.ScreenOrientation.LandscapeSensor
+			end)
+		end
+	end)
+end
+
 Players.PlayerAdded:Connect(function(player)
+	lockLandscape(player)
 	player.CharacterAdded:Connect(applyWalkSpeed)
 	if player.Character then
 		applyWalkSpeed(player.Character)
@@ -78,6 +90,7 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 end)
 for _, p in Players:GetPlayers() do
+	lockLandscape(p)
 	p.CharacterAdded:Connect(applyWalkSpeed)
 	if p.Character then
 		applyWalkSpeed(p.Character)
@@ -273,6 +286,46 @@ end)
 
 -- Use hint / match: decrement persistent inventory. Client fires optimistically
 -- on use; server is the source of truth for the count.
+-- Dev-only: grant the caller any lucky block by id. Gated to Studio or the
+-- place's creator so shipped clients can't abuse the remote.
+local RunService = game:GetService("RunService")
+local GroupService = game:GetService("GroupService")
+
+-- Mirror of DevMenu's DEV_USER_IDS. Keep these two lists in sync.
+local DEV_USER_IDS: { [number]: boolean } = {
+	-- [123456789] = true,
+}
+
+local groupOwnerCache: { [number]: boolean } = {}
+local function isGroupOwner(userId: number): boolean
+	if game.CreatorType ~= Enum.CreatorType.Group then return false end
+	local cached = groupOwnerCache[userId]
+	if cached ~= nil then return cached end
+	local ok, info = pcall(function()
+		return GroupService:GetGroupInfoAsync(game.CreatorId)
+	end)
+	local owner = ok and info and info.Owner and info.Owner.Id == userId
+	groupOwnerCache[userId] = owner or false
+	return owner == true
+end
+
+local function isDevAuthorized(player: Player): boolean
+	if RunService:IsStudio() then return true end
+	if DEV_USER_IDS[player.UserId] then return true end
+	if game.CreatorType == Enum.CreatorType.User and player.UserId == game.CreatorId then
+		return true
+	end
+	if isGroupOwner(player.UserId) then return true end
+	return false
+end
+RemoteSetup.Get("DevGrantLuckyBlock").OnServerEvent:Connect(function(player, blockId)
+	if not isDevAuthorized(player) then return end
+	if typeof(blockId) ~= "string" then return end
+	if not LuckyBlockCatalog.Get(blockId) then return end
+	ProfileService.AddLuckyBlock(player, blockId)
+	LuckyBlockShop.GrantTool(player, blockId)
+end)
+
 RemoteSetup.Get("UseHint").OnServerEvent:Connect(function(player)
 	if not RateLimit.check("UseHint", player, 0.3) then return end
 	ProfileService.UseHint(player)

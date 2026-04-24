@@ -110,9 +110,10 @@ local function buildToolTemplates()
 		end
 		local source = findBlockModel(entry.modelName)
 		if not source then
-			warn(`[LuckyBlockShop] Missing model in Workspace: {entry.modelName}`)
+			warn(`[LuckyBlockShop] Missing model for "{entry.id}" — looked for modelName="{entry.modelName}" in ReplicatedStorage.LuckyBlocks / ReplicatedStorage.Animated Lucky Blocks / Workspace`)
 			continue
 		end
+		print(`[LuckyBlockShop] building template for {entry.id} from source at {source:GetFullName()}`)
 
 		local tool = Instance.new("Tool")
 		tool.Name = entry.id
@@ -408,18 +409,28 @@ end
 -- Tool granting
 ---------------------------------------------------------------------------
 
-function LuckyBlockShop.GrantTool(player: Player, blockId: string)
+function LuckyBlockShop.GrantTool(player: Player, blockId: string): boolean
 	if not toolTemplates then
-		return
+		return false
 	end
 	local template = toolTemplates:FindFirstChild(blockId)
 	if not template then
-		warn(`[LuckyBlockShop] No tool template for {blockId}`)
-		return
+		-- Template wasn't built at boot (e.g. the workspace model streamed in
+		-- late, or the block was added after Init). Try one lazy rebuild so a
+		-- gift / grant for a late-loading block still produces a real tool.
+		buildToolTemplates()
+		template = toolTemplates and toolTemplates:FindFirstChild(blockId)
+	end
+	if not template then
+		warn(`[LuckyBlockShop] No tool template for {blockId} — tool will NOT appear in backpack. Check the workspace/ReplicatedStorage model.`)
+		return false
 	end
 	local tool = template:Clone()
 	tool.Name = "LuckyBlock_" .. blockId
-	tool.Parent = player:FindFirstChild("Backpack") or player
+	local backpack = player:FindFirstChild("Backpack")
+	tool.Parent = backpack or player
+	print(`[LuckyBlockShop] GrantTool: parented "{tool.Name}" to {if backpack then "Backpack" else "Player (no Backpack!)"} for {player.Name}`)
+	return true
 end
 
 ---------------------------------------------------------------------------
@@ -604,7 +615,178 @@ end
 -- Init
 ---------------------------------------------------------------------------
 
+local GIFT_MAX_DISTANCE = 18 -- studs; generous enough for side-by-side avatars
+
+local function destroyOneHeldTool(player: Player, blockId: string): boolean
+	local toolName = "LuckyBlock_" .. blockId
+	local character = player.Character
+	if character then
+		local t = character:FindFirstChild(toolName)
+		if t then t:Destroy() return true end
+	end
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		local t = backpack:FindFirstChild(toolName)
+		if t then t:Destroy() return true end
+	end
+	return false
+end
+
+local function notifyPlayer(player: Player, msg: string)
+	local notify = getRemote("ShowNotification")
+	if notify then
+		(notify :: RemoteEvent):FireClient(player, msg)
+	end
+end
+
+-- Grants the physical Tool to the recipient, retrying briefly if the Backpack
+-- or tool template isn't ready yet (e.g. recipient is mid-respawn or the
+-- template folder finished building late). The profile-level credit already
+-- happened before this call, so even if every attempt fails the recipient
+-- will get the tool rebuilt on their next join via grantExistingBlocks.
+local function grantToolWithRetry(target: Player, blockId: string)
+	local attempts = 0
+	local function attempt()
+		if not target.Parent then return end
+		attempts += 1
+		local hasBackpack = target:FindFirstChild("Backpack") ~= nil
+		local hasTemplate = toolTemplates and toolTemplates:FindFirstChild(blockId) ~= nil
+		if hasBackpack and hasTemplate then
+			if LuckyBlockShop.GrantTool(target, blockId) then return end
+		end
+		if attempts < 6 then
+			task.delay(0.5, attempt)
+		else
+			warn(`[LuckyBlockShop] grantToolWithRetry gave up for {target.Name}/{blockId} — profile already credits; tool will appear on rejoin`)
+		end
+	end
+	attempt()
+end
+
+local function onGiftLuckyBlock(sender: Player, targetUserId: any, blockId: any)
+	if typeof(targetUserId) ~= "number" or typeof(blockId) ~= "string" then return end
+	local target = Players:GetPlayerByUserId(targetUserId)
+	if not target or target == sender then return end
+
+	local entry = LuckyBlockCatalog.Get(blockId)
+	if not entry then
+		notifyPlayer(sender, `Unknown lucky block — gift cancelled.`)
+		return
+	end
+
+	-- --- Pre-flight: validate BOTH sides before touching any profile data ---
+	local sData = ProfileService.GetData(sender)
+	if not sData then
+		notifyPlayer(sender, `Your profile isn't ready — try again in a moment.`)
+		return
+	end
+	local senderCount = (sData.LuckyBlocks or {})[blockId] or 0
+	if senderCount <= 0 then
+		notifyPlayer(sender, `You don't have any {entry.displayName} to gift.`)
+		return
+	end
+
+	local tData = ProfileService.GetData(target)
+	if not tData then
+		notifyPlayer(sender, `{target.DisplayName} isn't ready yet — try again in a moment.`)
+		warn(`[LuckyBlockShop] Gift aborted: target {target.Name} profile not loaded`)
+		return
+	end
+
+	local sChar = sender.Character
+	local sRoot = sChar and sChar:FindFirstChild("HumanoidRootPart")
+	local tChar = target.Character
+	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if not sRoot then
+		notifyPlayer(sender, `You're respawning — try again in a moment.`)
+		return
+	end
+	if not tRoot then
+		notifyPlayer(sender, `{target.DisplayName} is respawning — try again in a moment.`)
+		return
+	end
+	local dist = ((sRoot :: BasePart).Position - (tRoot :: BasePart).Position).Magnitude
+	if dist > GIFT_MAX_DISTANCE then
+		notifyPlayer(sender, `Get closer to {target.DisplayName} to gift.`)
+		return
+	end
+
+	-- Make sure a tool template exists for this block BEFORE consuming the
+	-- sender's inventory. If the template is missing (late-added block or the
+	-- workspace model streamed in late), do a lazy rebuild. Without this, the
+	-- profile transfer succeeds but the recipient never sees a tool.
+	local templateBefore = toolTemplates and toolTemplates:FindFirstChild(blockId)
+	if toolTemplates and not templateBefore then
+		buildToolTemplates()
+		local templateAfter = toolTemplates and toolTemplates:FindFirstChild(blockId)
+		if not templateAfter then
+			-- The source model for this block is missing entirely. Aborting
+			-- here protects the sender from losing a block that can never
+			-- produce a physical tool for the recipient.
+			notifyPlayer(sender, `{entry.displayName} is misconfigured — please report to dev.`)
+			return
+		end
+	end
+
+	-- --- Atomic profile transfer. Any failure after UseLuckyBlock refunds. ---
+	if not ProfileService.UseLuckyBlock(sender, blockId) then
+		notifyPlayer(sender, `Gift failed — try again.`)
+		return
+	end
+
+	local function refundSender(reason: string)
+		ProfileService.AddLuckyBlock(sender, blockId)
+		warn(`[LuckyBlockShop] Gift refunded ({reason}) for {sender.Name} -> {target.Name} ({blockId})`)
+		notifyPlayer(sender, `Gift failed — {entry.displayName} returned to your inventory.`)
+	end
+
+	-- Recipient profile could have released between the pre-flight check and
+	-- now (rare disconnect race). AddLuckyBlock returns false in that case.
+	if not ProfileService.GetData(target) then
+		refundSender("recipient profile vanished mid-transfer (GetData nil)")
+		return
+	end
+	if not ProfileService.AddLuckyBlock(target, blockId) then
+		refundSender("AddLuckyBlock(target) returned false")
+		return
+	end
+
+	-- Profile transfer is committed. Now destroy sender's held/stored tool and
+	-- grant the recipient's physical tool. Both are cosmetic — the profile is
+	-- authoritative, so even if tool grant lags (backpack not ready), the
+	-- recipient's data already reflects the new block.
+	destroyOneHeldTool(sender, blockId)
+	grantToolWithRetry(target, blockId)
+
+	notifyPlayer(sender, `Gifted {entry.displayName} to {target.DisplayName}!`)
+	-- Fallback toast for recipient via the generic ShowNotification remote.
+	-- LuckyBlockGiftReceived requires LuckyBlockGifting.Start() to have run on
+	-- the recipient's client; if that script silently errored (seen on mobile),
+	-- the rich toast never fires. ShowNotification is the same channel used
+	-- for purchase confirmations and is known-good on all platforms.
+	notifyPlayer(target, `🎁 {sender.DisplayName} gifted you a {entry.displayName}!`)
+	local giftRemote = getRemote("LuckyBlockGiftReceived")
+	if giftRemote then
+		(giftRemote :: RemoteEvent):FireClient(target, {
+			blockId = blockId,
+			displayName = entry.displayName,
+			fromName = sender.DisplayName,
+		})
+	end
+
+	local Analytics = require(script.Parent:WaitForChild("Analytics"))
+	Analytics.LogCustom(sender, "LuckyBlockGifted", 1, { CustomField04 = blockId }, "lobby")
+end
+
 local function bindRemotes()
+	local giftRemote = getRemote("GiftLuckyBlock")
+	if giftRemote then
+		(giftRemote :: RemoteEvent).OnServerEvent:Connect(function(player, targetUserId, blockId)
+			if not RateLimit.check("GiftLuckyBlock", player, 1.0) then return end
+			onGiftLuckyBlock(player, targetUserId, blockId)
+		end)
+	end
+
 	local openRemote = getRemote("OpenLuckyBlock")
 	if openRemote then
 		(openRemote :: RemoteEvent).OnServerEvent:Connect(function(player, blockId, dropPosition)

@@ -18,7 +18,12 @@ export type SliderProps = {
 
 local function Slider(props: SliderProps)
 	local trackRef = React.useRef(nil :: Instance?)
-	local dragging = React.useRef(false)
+	-- Track the *specific* input object that started this drag, not a boolean.
+	-- On mobile each finger is its own InputObject; using a boolean caused a
+	-- second touch on an adjacent slider to accidentally control this one too
+	-- (both sliders saw the global InputChanged stream and thought it was
+	-- "their" drag). Storing the InputObject lets us ignore unrelated touches.
+	local activeInput = React.useRef(nil :: InputObject?)
 
 	local displayValue = math.floor(props.value * (props.max - props.min) + props.min + 0.5)
 
@@ -37,26 +42,18 @@ local function Slider(props: SliderProps)
 
 	React.useEffect(function()
 		local moveCon = UserInputService.InputChanged:Connect(function(input)
-			if not dragging.current then
+			if activeInput.current ~= input then
 				return
 			end
-			if
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				local val = computeValue(input.Position.X)
-				if val then
-					props.onChange(val)
-				end
+			local val = computeValue(input.Position.X)
+			if val then
+				props.onChange(val)
 			end
 		end)
 
 		local endCon = UserInputService.InputEnded:Connect(function(input)
-			if
-				input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				dragging.current = false
+			if activeInput.current == input then
+				activeInput.current = nil
 			end
 		end)
 
@@ -97,7 +94,11 @@ local function Slider(props: SliderProps)
 					input.UserInputType == Enum.UserInputType.MouseButton1
 					or input.UserInputType == Enum.UserInputType.Touch
 				then
-					dragging.current = true
+					-- Only claim the drag if no other finger is already driving
+					-- this slider. Prevents a second touch on the track from
+					-- yanking the thumb mid-drag.
+					if activeInput.current ~= nil then return end
+					activeInput.current = input
 					local val = computeValue(input.Position.X)
 					if val then
 						props.onChange(val)

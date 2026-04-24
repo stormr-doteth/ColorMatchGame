@@ -67,6 +67,10 @@ local function isCosmeticRing(inst: Instance): boolean
 	return inst.Name == "CosmeticRing" and (inst:IsA("Model") or inst:IsA("BasePart"))
 end
 
+local function isFeedbackArea(inst: Instance): boolean
+	return inst.Name == "FeedbackArea" and (inst:IsA("Model") or inst:IsA("BasePart"))
+end
+
 local function isTreasureRing(inst: Instance): boolean
 	if inst.Name ~= "TreasureRing" then return false end
 	if not (inst:IsA("Model") or inst:IsA("BasePart")) then return false end
@@ -132,9 +136,12 @@ function ZoneTrigger.Init()
 	local closeCos = getRemote("CloseCosmeticsShop")
 	local openRew = getRemote("OpenRewards")
 	local closeRew = getRemote("CloseRewards")
+	local openFeedback = getRemote("OpenFeedback")
+	local closeFeedback = getRemote("CloseFeedback")
 
 	resolveZone("cosmetics", isCosmeticRing, openCos, closeCos)
 	resolveZone("rewards", isTreasureRing, openRew, closeRew)
+	resolveZone("feedback", isFeedbackArea, openFeedback, closeFeedback)
 
 	local function onPlayer(player: Player)
 		wasInside[player] = {}

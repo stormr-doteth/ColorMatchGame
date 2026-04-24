@@ -14,6 +14,7 @@ local InventoryHud = require(script:WaitForChild("InventoryHud"))
 local NotificationHud = require(script:WaitForChild("NotificationHud"))
 local HintShop = require(script:WaitForChild("HintShop"))
 local LuckyBlockClient = require(script:WaitForChild("LuckyBlockClient"))
+local LuckyBlockGifting = require(script:WaitForChild("LuckyBlockGifting"))
 local LuckyBlockShopUI = require(script:WaitForChild("LuckyBlockShopUI"))
 local GamepassSpamRotator = require(script:WaitForChild("GamepassSpamRotator"))
 local RewardsUI = require(script:WaitForChild("RewardsUI"))
@@ -27,11 +28,29 @@ local FeedbackHud = require(script:WaitForChild("FeedbackHud"))
 local ShopButtonsHider = require(script:WaitForChild("ShopButtonsHider"))
 local MatchBlur = require(script:WaitForChild("MatchBlur"))
 local SoundManager = require(script:WaitForChild("SoundManager"))
+local DevMenu = require(script:WaitForChild("DevMenu"))
+local LuckyBlockHotbar = require(script:WaitForChild("LuckyBlockHotbar"))
 local UIEffects = require(script:WaitForChild("UIEffects"))
 local App = require(script:WaitForChild("ui"):WaitForChild("App"))
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- Force landscape on mobile. The server also sets this, but server-side
+-- PlayerGui.ScreenOrientation occasionally doesn't replicate to the client on
+-- first join (race with the PlayerGui being created), so we re-assert here
+-- and again whenever it gets reset.
+local function forceLandscape()
+	pcall(function()
+		playerGui.ScreenOrientation = Enum.ScreenOrientation.LandscapeSensor
+	end)
+end
+forceLandscape()
+playerGui:GetPropertyChangedSignal("ScreenOrientation"):Connect(function()
+	if playerGui.ScreenOrientation ~= Enum.ScreenOrientation.LandscapeSensor then
+		forceLandscape()
+	end
+end)
 
 -- Disable Roblox's built-in reset-character button. Roblox requires this to
 -- be re-asserted on CharacterAdded because the engine re-enables it on each
@@ -60,6 +79,7 @@ InventoryHud.Start()
 NotificationHud.Start()
 HintShop.Start()
 LuckyBlockClient.Start()
+LuckyBlockGifting.Start()
 LuckyBlockShopUI.Start()
 GamepassSpamRotator.Start()
 RewardsUI.Start()
@@ -72,6 +92,9 @@ MatchPaperHider.Start()
 ShopButtonsHider.Start()
 MatchBlur.Start()
 SoundManager.Start()
+FeedbackHud.Start()
+DevMenu.Start()
+LuckyBlockHotbar.Start()
 
 -- Wire hover/press feedback onto the left-column shop buttons once they're
 -- reparented to NoInsetGui. Done in a task so we don't race the reparent below.

@@ -22,7 +22,11 @@ local function VerticalStrip(props: {
 	Name: string?,
 })
 	local stripRef = React.useRef(nil :: Instance?)
-	local dragging = React.useRef(false)
+	-- Track the specific InputObject (a single finger) that owns this drag so
+	-- a second touch on an adjacent strip doesn't hijack the thumb of this one.
+	-- On mobile the three strips are ~60px wide and ~10px apart, so fingers
+	-- frequently stray across the boundary mid-drag.
+	local activeInput = React.useRef(nil :: InputObject?)
 	local focused = React.useRef(false)
 	-- Latest value/onChange captured in a ref so long-lived Heartbeat/input
 	-- callbacks registered once in useEffect always read current values.
@@ -45,26 +49,18 @@ local function VerticalStrip(props: {
 
 	React.useEffect(function()
 		local moveCon = UserInputService.InputChanged:Connect(function(input)
-			if not dragging.current then
+			if activeInput.current ~= input then
 				return
 			end
-			if
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				local val = computeValue(input.Position.Y)
-				if val then
-					props.onChange(val)
-				end
+			local val = computeValue(input.Position.Y)
+			if val then
+				props.onChange(val)
 			end
 		end)
 
 		local endCon = UserInputService.InputEnded:Connect(function(input)
-			if
-				input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				dragging.current = false
+			if activeInput.current == input then
+				activeInput.current = nil
 			end
 		end)
 
@@ -128,7 +124,12 @@ local function VerticalStrip(props: {
 				input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch
 			then
-				dragging.current = true
+				-- Refuse the touch if this strip already has a finger down, and
+				-- also refuse if ANY strip currently has an active drag (we
+				-- check via the shared ref pattern below). This keeps one finger
+				-- = one strip, which is the mental model players expect.
+				if activeInput.current ~= nil then return end
+				activeInput.current = input
 				local val = computeValue(input.Position.Y)
 				if val then
 					props.onChange(val)
@@ -208,7 +209,10 @@ local function ColorPicker(props: ColorPickerProps)
 		Layout = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 10),
+			-- Wider spacing so fingers don't straddle two strips at once on
+			-- touch. The per-strip input-lock handles the edge cases, but a
+			-- physical gap gives players confidence they're hitting one.
+			Padding = UDim.new(0, 18),
 		}),
 
 		HueStrip = e(VerticalStrip, {

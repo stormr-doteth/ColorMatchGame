@@ -203,18 +203,43 @@ local function buildUi(playerGui: PlayerGui): ScreenGui
 	return g
 end
 
-function FeedbackHud.Toggle()
+local function ensureGui(): ScreenGui
 	if not gui then
 		local playerGui = localPlayer:WaitForChild("PlayerGui")
 		gui = buildUi(playerGui)
 	end
-	visible = not visible;
-	(gui :: ScreenGui).Enabled = visible
+	return gui :: ScreenGui
+end
+
+function FeedbackHud.Open()
+	if visible then return end
+	visible = true
+	ensureGui().Enabled = true
+end
+
+function FeedbackHud.Close()
+	if not visible then return end
+	visible = false
+	if gui then (gui :: ScreenGui).Enabled = false end
+end
+
+function FeedbackHud.Toggle()
+	if visible then FeedbackHud.Close() else FeedbackHud.Open() end
 end
 
 function FeedbackHud.Start()
 	-- Build lazily on first toggle to avoid creating the UI for players who
 	-- never open it.
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local openRemote = remotes:WaitForChild("OpenFeedback", 5)
+	local closeRemote = remotes:WaitForChild("CloseFeedback", 5)
+	if openRemote then
+		(openRemote :: RemoteEvent).OnClientEvent:Connect(FeedbackHud.Open)
+	end
+	if closeRemote then
+		(closeRemote :: RemoteEvent).OnClientEvent:Connect(FeedbackHud.Close)
+	end
 end
 
 return FeedbackHud

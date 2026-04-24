@@ -1,9 +1,7 @@
-local ContextActionService = game:GetService("ContextActionService")
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SocialService = game:GetService("SocialService")
-local UserInputService = game:GetService("UserInputService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages.React)
@@ -357,17 +355,6 @@ local function GameController()
 
 	-- Match state
 	local phase, setPhase = React.useState("idle") -- idle|seated|waiting|showing|guessing|submitted|roundResult|matchEnd
-	-- Track whether the last input was a gamepad so we can conditionally show
-	-- controller-only hint pills (e.g., "Ⓑ Leave" next to LEAVE TABLE).
-	local isGamepad, setIsGamepad = React.useState(
-		UserInputService:GetLastInputType() == Enum.UserInputType.Gamepad1
-	)
-	React.useEffect(function()
-		local conn = UserInputService.LastInputTypeChanged:Connect(function(t)
-			setIsGamepad(t == Enum.UserInputType.Gamepad1)
-		end)
-		return function() conn:Disconnect() end
-	end, {})
 	local opponentName, setOpponentName = React.useState("")
 	local roundsToWin, setRoundsToWin = React.useState(3)
 	local seatedPlayerCount, setSeatedPlayerCount = React.useState(0)
@@ -547,22 +534,11 @@ local function GameController()
 		return function() cancelled = true end
 	end, { phase })
 
-	-- ButtonB leaves the table during any in-match phase. Falls through when
-	-- idle so the global UIManager bind (which closes open panels) still works.
-	React.useEffect(function()
-		local inMatch = phase == "seated" or phase == "waiting" or phase == "countdown"
-			or phase == "soloIntro" or phase == "showing" or phase == "guessing"
-			or phase == "submitted" or phase == "roundResult" or phase == "matchEnd"
-		if not inMatch then return end
-		ContextActionService:BindAction("GameController_LeaveTable", function(_, state)
-			if state ~= Enum.UserInputState.Begin then return Enum.ContextActionResult.Pass end
-			handleClose()
-			return Enum.ContextActionResult.Sink
-		end, false, Enum.KeyCode.ButtonB)
-		return function()
-			ContextActionService:UnbindAction("GameController_LeaveTable")
-		end
-	end, { phase, handleClose })
+	-- ButtonB is intentionally NOT bound to leave-table during a match.
+	-- Leaving mid-duel is too easy to trigger accidentally with a gamepad,
+	-- and it abandons the opponent. Players must press the on-screen LEAVE
+	-- TABLE button deliberately. ButtonB falls through to UIManager's global
+	-- panel-close bind (which no-ops when no panel is open).
 
 	-- Send guess preview to server so table papers update in real time
 	React.useEffect(function()
@@ -1245,17 +1221,6 @@ local function GameController()
 							Thickness = 2,
 							Transparency = 0.5,
 						}),
-						Hint = isGamepad and e("TextLabel", {
-							AnchorPoint = Vector2.new(0, 0.5),
-							Position = UDim2.new(1, 10, 0.5, 0),
-							Size = UDim2.fromOffset(130, 30),
-							BackgroundTransparency = 1,
-							Text = "Ⓑ Leave",
-							TextColor3 = Color3.fromRGB(255, 255, 255),
-							Font = Enum.Font.FredokaOne,
-							TextScaled = true,
-							TextXAlignment = Enum.TextXAlignment.Left,
-						}) or nil,
 						Label = e("TextLabel", {
 							Size = UDim2.fromScale(1, 1),
 							BackgroundTransparency = 1,

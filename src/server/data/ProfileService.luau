@@ -309,13 +309,15 @@ function ProfileService.UseMatch(player): boolean
 	return true
 end
 
-function ProfileService.AddLuckyBlock(player, blockId: string)
+function ProfileService.AddLuckyBlock(player, blockId: string): boolean
 	local profile = activeProfiles[player]
-	if profile then
-		local blocks = profile.Data.LuckyBlocks
-		blocks[blockId] = (blocks[blockId] or 0) + 1
-		notify(player)
+	if not profile then
+		return false
 	end
+	local blocks = profile.Data.LuckyBlocks
+	blocks[blockId] = (blocks[blockId] or 0) + 1
+	notify(player)
+	return true
 end
 
 -- Decrements the count of a lucky block type. Returns true if successful.
