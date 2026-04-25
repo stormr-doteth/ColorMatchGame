@@ -61,7 +61,15 @@ end
 -- mouse/keyboard), so the emulator always looked like desktop. Using viewport
 -- width lets the emulator's simulated screen sizes flip us to the mobile layout
 -- while still keeping real desktops on the desktop layout.
+--
+-- Dev override: setting `_G.DEV_FORCE_MOBILE = true` (or the PlayerGui
+-- attribute "DevForceMobile") forces the mobile layout regardless of viewport
+-- or device. This is the bulletproof way to test mobile in Studio when the
+-- device emulator's viewport detection is flaky.
 local function isTouchOnly(): boolean
+	if _G.DEV_FORCE_MOBILE == true then return true end
+	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+	if pg and pg:GetAttribute("DevForceMobile") == true then return true end
 	if not UserInputService.TouchEnabled then return false end
 	local camera = workspace.CurrentCamera
 	local viewportX = if camera then camera.ViewportSize.X else 1920
@@ -308,6 +316,21 @@ local function popSlot(slot: SlotRefs)
 	}):Play()
 end
 
+-- Restart tears down the existing hotbar + expanded panel and lets a future
+-- Start() build them fresh. Useful for the DevMenu's "Force Mobile" toggle so
+-- the layout switches without having to Stop+Play.
+function LuckyBlockHotbar.Restart()
+	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+	if pg then
+		local existing = pg:FindFirstChild("LuckyBlockHotbar")
+		if existing then existing:Destroy() end
+		local existingPanel = pg:FindFirstChild("LuckyBlockExpandedPanel")
+		if existingPanel then existingPanel:Destroy() end
+	end
+	started = false
+	LuckyBlockHotbar.Start()
+end
+
 function LuckyBlockHotbar.Start()
 	if started then return end
 	started = true
@@ -391,16 +414,24 @@ function LuckyBlockHotbar.Start()
 	expand.BackgroundColor3 = Color3.fromRGB(60, 63, 72)
 	expand.BorderSizePixel = 0
 	expand.AutoButtonColor = true
-	expand.Image = "rbxassetid://84591418883059"
-	expand.ScaleType = Enum.ScaleType.Fit
-	expand.ImageColor3 = Color3.fromRGB(255, 255, 255)
+	-- Background only on the button itself; the arrow lives as a child
+	-- ImageLabel so we can rotate JUST the arrow without flipping the
+	-- rounded-corner background or messing with the button's hit region.
+	expand.Image = ""
 	expand.Visible = false
 	expand.Parent = hotbar
 	local ec = Instance.new("UICorner"); ec.CornerRadius = UDim.new(0.2, 0); ec.Parent = expand
-	local ePad = Instance.new("UIPadding")
-	ePad.PaddingTop = UDim.new(0.18, 0); ePad.PaddingBottom = UDim.new(0.18, 0)
-	ePad.PaddingLeft = UDim.new(0.18, 0); ePad.PaddingRight = UDim.new(0.18, 0)
-	ePad.Parent = expand
+
+	local expandArrow = Instance.new("ImageLabel")
+	expandArrow.Name = "Arrow"
+	expandArrow.AnchorPoint = Vector2.new(0.5, 0.5)
+	expandArrow.Position = UDim2.fromScale(0.5, 0.5)
+	expandArrow.Size = UDim2.fromScale(0.64, 0.64)
+	expandArrow.BackgroundTransparency = 1
+	expandArrow.Image = "rbxassetid://84591418883059"
+	expandArrow.ScaleType = Enum.ScaleType.Fit
+	expandArrow.ImageColor3 = Color3.fromRGB(255, 255, 255)
+	expandArrow.Parent = expand
 
 	-- Expanded grid panel (hidden by default). Scale-sized against the screen
 	-- so it feels consistent across devices.
@@ -419,24 +450,35 @@ function LuckyBlockHotbar.Start()
 
 	local panel = Instance.new("Frame")
 	panel.Name = "ExpandedPanel"
-	-- Panel bottom sits just above the hotbar top. Hotbar top is at roughly
-	-- `0.95 - slotHeightScale` (hotbar.Position.Y=0.95, AnchorPoint.Y=1,
-	-- height=slotHeightScale). Leave ~2% screen gap so they don't touch.
-	local panelOpenY = 0.93 - slotHeightScale
+	-- Panel bottom sits comfortably above the hotbar top. Hotbar top is at
+	-- roughly `0.95 - slotHeightScale` (hotbar.Position.Y=0.95,
+	-- AnchorPoint.Y=1, height=slotHeightScale). Use a larger gap (~5% of
+	-- screen) so the panel and the hotbar's count badges don't overlap when
+	-- the row beneath the panel pokes up.
+	local panelOpenY = 0.90 - slotHeightScale
 	-- Closed state hides the panel offscreen below for the slide-in tween.
 	local panelClosedY = 1.15
 	panel.AnchorPoint = Vector2.new(0.5, 1)
 	panel.Position = UDim2.new(0.5, 0, panelClosedY, 0)
-	panel.Size = UDim2.fromScale(if mobile then 0.9 else 0.6, 0.4)
+	-- Cap the panel width at 50% of the screen so it stops bleeding edge-to-edge
+	-- on mobile (which was clipping the panel stroke against the screen border
+	-- and crowding the 3D scene).
+	panel.Size = UDim2.fromScale(0.5, 0.4)
 	panel.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 	panel.BackgroundTransparency = 0.05
 	panel.BorderSizePixel = 0
-	panel.ClipsDescendants = true
+	-- ClipsDescendants is intentionally OFF so the panel's own stroke (and any
+	-- slot strokes that hit the panel edge) render fully instead of being
+	-- shaved by the rounded corner/clip rect.
+	panel.ClipsDescendants = false
 	panel.Visible = false
 	panel.Parent = panelGui
 	local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0.03, 0); pc.Parent = panel
 	local ps = Instance.new("UIStroke"); ps.Color = Color3.fromRGB(80, 85, 95); ps.Thickness = 2
-	ps.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	-- Contextual: on the expanded panel itself we want the stroke OUTSIDE the
+	-- fill so the corner radius doesn't eat the top edge stroke under
+	-- ApplyStrokeMode.Border (which was contributing to the "cut off" look).
+	ps.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
 	ps.Parent = panel
 
 	-- Inner padding so cells don't butt up against the panel's rounded corners
@@ -463,7 +505,9 @@ function LuckyBlockHotbar.Start()
 	local scroll = Instance.new("ScrollingFrame")
 	scroll.AnchorPoint = Vector2.new(0.5, 1)
 	scroll.Position = UDim2.fromScale(0.5, 0.97)
-	scroll.Size = UDim2.fromScale(0.94, 0.8)
+	-- Slightly tighter than full-width so the centered grid has equal margin
+	-- on both sides relative to the panel stroke.
+	scroll.Size = UDim2.fromScale(0.9, 0.8)
 	scroll.BackgroundTransparency = 1
 	scroll.BorderSizePixel = 0
 	scroll.ScrollBarThickness = 4
@@ -474,10 +518,21 @@ function LuckyBlockHotbar.Start()
 	-- Grid cells sized as a scale of the panel so they stay proportional.
 	-- UIGridLayout needs exact CellSize. We recompute it in render() from the
 	-- scroll's current AbsoluteSize so cells stay square and responsive.
+	-- Inset the scroll content a few px so the top row's stroke isn't shaved
+	-- by the ScrollingFrame's default ClipsDescendants. Without this padding
+	-- the stroke pops back in only after the user scrolls down (because the
+	-- items move past the clip edge).
+	local scrollPad = Instance.new("UIPadding")
+	scrollPad.PaddingTop = UDim.new(0, 6)
+	scrollPad.PaddingBottom = UDim.new(0, 6)
+	scrollPad.PaddingLeft = UDim.new(0, 4)
+	scrollPad.PaddingRight = UDim.new(0, 4)
+	scrollPad.Parent = scroll
+
 	local grid = Instance.new("UIGridLayout")
 	grid.CellSize = UDim2.fromOffset(60, 60)
 	grid.CellPadding = UDim2.fromScale(0.02, 0.03)
-	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	grid.SortOrder = Enum.SortOrder.LayoutOrder
 	grid.Parent = scroll
 
@@ -486,11 +541,13 @@ function LuckyBlockHotbar.Start()
 	-- fit in the scroll's width — preventing the "3 huge cells" look on wide
 	-- panels where naive (width / N) math ballooned each cell to 300+ px.
 	local function resizeGridCells()
-		-- Available width = scroll width minus the scrollbar and a small safety
-		-- margin. AbsoluteSize doesn't subtract the scrollbar, and UIGridLayout
-		-- doesn't know about it either — without this the rightmost cell wraps
-		-- or clips against the panel stroke.
-		local w = scroll.AbsoluteSize.X - scroll.ScrollBarThickness - 4
+		-- Available width = scroll width minus the scrollbar and a generous
+		-- safety margin. AbsoluteSize doesn't subtract the scrollbar, and
+		-- UIGridLayout doesn't know about it either — without enough headroom
+		-- the rightmost cell wraps or clips against the panel stroke. Bumped
+		-- the safety margin so cells fit cleanly even with rounded-corner
+		-- antialiasing on the panel.
+		local w = scroll.AbsoluteSize.X - scroll.ScrollBarThickness - 12
 		if w <= 0 then return end
 		local padding = 8
 		local maxCell = currentSlotPixels()
@@ -520,7 +577,7 @@ function LuckyBlockHotbar.Start()
 		TweenService:Create(panel, TWEEN_INFO, {
 			Position = UDim2.new(0.5, 0, panelOpenY, 0),
 		}):Play()
-		TweenService:Create(expand, TWEEN_INFO, { Rotation = 180 }):Play()
+		TweenService:Create(expandArrow, TWEEN_INFO, { Rotation = 180 }):Play()
 	end
 
 	local function closePanel()
@@ -534,7 +591,7 @@ function LuckyBlockHotbar.Start()
 			if not panelOpen then panel.Visible = false end
 		end)
 		tween:Play()
-		TweenService:Create(expand, TWEEN_INFO, { Rotation = 0 }):Play()
+		TweenService:Create(expandArrow, TWEEN_INFO, { Rotation = 0 }):Play()
 	end
 
 	expand.Activated:Connect(function()

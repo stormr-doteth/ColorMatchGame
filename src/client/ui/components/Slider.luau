@@ -41,10 +41,18 @@ local function Slider(props: SliderProps)
 	end
 
 	React.useEffect(function()
+		-- See ColorPicker.luau for the rationale: mouse drags arrive as a
+		-- separate MouseMovement InputObject from the MouseButton1 that opened
+		-- them, so we type-match the mouse path and identity-match touches.
 		local moveCon = UserInputService.InputChanged:Connect(function(input)
-			if activeInput.current ~= input then
-				return
-			end
+			local active = activeInput.current
+			if not active then return end
+			local sameTouch = input.UserInputType == Enum.UserInputType.Touch
+				and active.UserInputType == Enum.UserInputType.Touch
+				and active == input
+			local mouseDrag = input.UserInputType == Enum.UserInputType.MouseMovement
+				and active.UserInputType == Enum.UserInputType.MouseButton1
+			if not (sameTouch or mouseDrag) then return end
 			local val = computeValue(input.Position.X)
 			if val then
 				props.onChange(val)
@@ -52,7 +60,12 @@ local function Slider(props: SliderProps)
 		end)
 
 		local endCon = UserInputService.InputEnded:Connect(function(input)
-			if activeInput.current == input then
+			local active = activeInput.current
+			if not active then return end
+			if active == input
+				or (active.UserInputType == Enum.UserInputType.MouseButton1
+					and input.UserInputType == Enum.UserInputType.MouseButton1)
+			then
 				activeInput.current = nil
 			end
 		end)

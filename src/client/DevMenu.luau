@@ -116,6 +116,79 @@ local function buildUi(grantRemote: RemoteEvent)
 	list.SortOrder = Enum.SortOrder.LayoutOrder
 	list.Parent = scroll
 
+	-- Force the LuckyBlockHotbar into mobile layout regardless of viewport,
+	-- because Studio's device emulator viewport detection is unreliable.
+	-- Toggling rebuilds the hotbar in place via LuckyBlockHotbar.Restart().
+	local LuckyBlockHotbar = require(script.Parent:WaitForChild("LuckyBlockHotbar"))
+	local forceMobileRow = Instance.new("TextButton")
+	forceMobileRow.Size = UDim2.new(1, -4, 0, 34)
+	forceMobileRow.BackgroundColor3 = Color3.fromRGB(80, 60, 40)
+	forceMobileRow.BorderSizePixel = 0
+	forceMobileRow.AutoButtonColor = true
+	forceMobileRow.TextColor3 = Color3.fromRGB(230, 230, 230)
+	forceMobileRow.Font = Enum.Font.FredokaOne
+	forceMobileRow.TextSize = 14
+	forceMobileRow.LayoutOrder = -3
+	forceMobileRow.Parent = scroll
+	local fmCorner = Instance.new("UICorner"); fmCorner.CornerRadius = UDim.new(0, 6); fmCorner.Parent = forceMobileRow
+	local function refreshForceMobileLabel()
+		local on = playerGui:GetAttribute("DevForceMobile") == true
+		forceMobileRow.Text = `Force Mobile Hotbar: {if on then "ON" else "OFF"}`
+	end
+	refreshForceMobileLabel()
+	forceMobileRow.Activated:Connect(function()
+		local on = playerGui:GetAttribute("DevForceMobile") == true
+		playerGui:SetAttribute("DevForceMobile", not on)
+		refreshForceMobileLabel()
+		LuckyBlockHotbar.Restart()
+	end)
+
+	-- Reset the server's GroupRewardClaimed flag so the dev can re-test the
+	-- claim flow from scratch (server otherwise silently rejects).
+	local resetGroupRow = Instance.new("TextButton")
+	resetGroupRow.Size = UDim2.new(1, -4, 0, 34)
+	resetGroupRow.BackgroundColor3 = Color3.fromRGB(40, 80, 60)
+	resetGroupRow.BorderSizePixel = 0
+	resetGroupRow.AutoButtonColor = true
+	resetGroupRow.Text = "Reset Group Claim"
+	resetGroupRow.TextColor3 = Color3.fromRGB(230, 230, 230)
+	resetGroupRow.Font = Enum.Font.FredokaOne
+	resetGroupRow.TextSize = 14
+	resetGroupRow.LayoutOrder = -2
+	resetGroupRow.Parent = scroll
+	local rgCorner = Instance.new("UICorner"); rgCorner.CornerRadius = UDim.new(0, 6); rgCorner.Parent = resetGroupRow
+	local resetGroupRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DevResetGroupClaim") :: RemoteEvent?
+	resetGroupRow.Activated:Connect(function()
+		if resetGroupRemote then
+			resetGroupRemote:FireServer()
+		end
+	end)
+
+	-- Toggle: pretend the player is NOT in the group, so the GroupRewardPrompt
+	-- claim button takes the "Join Group" path and PromptJoinAsync fires.
+	-- Useful when testing in Studio while already a member of the real group.
+	local notInGroupRow = Instance.new("TextButton")
+	notInGroupRow.Size = UDim2.new(1, -4, 0, 34)
+	notInGroupRow.BackgroundColor3 = Color3.fromRGB(60, 40, 80)
+	notInGroupRow.BorderSizePixel = 0
+	notInGroupRow.AutoButtonColor = true
+	notInGroupRow.TextColor3 = Color3.fromRGB(230, 230, 230)
+	notInGroupRow.Font = Enum.Font.FredokaOne
+	notInGroupRow.TextSize = 14
+	notInGroupRow.LayoutOrder = -1
+	notInGroupRow.Parent = scroll
+	local nigCorner = Instance.new("UICorner"); nigCorner.CornerRadius = UDim.new(0, 6); nigCorner.Parent = notInGroupRow
+	local function refreshNotInGroupLabel()
+		local on = playerGui:GetAttribute("DevForceNotInGroup") == true
+		notInGroupRow.Text = `Force "Not In Group": {if on then "ON" else "OFF"}`
+	end
+	refreshNotInGroupLabel()
+	notInGroupRow.Activated:Connect(function()
+		local on = playerGui:GetAttribute("DevForceNotInGroup") == true
+		playerGui:SetAttribute("DevForceNotInGroup", not on)
+		refreshNotInGroupLabel()
+	end)
+
 	for i, entry in LuckyBlockCatalog.GetAll() do
 		local row = Instance.new("TextButton")
 		row.Size = UDim2.new(1, -4, 0, 34)

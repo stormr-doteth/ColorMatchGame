@@ -465,7 +465,18 @@ function TableManager.Init()
 		local isSolo = chair2 == nil
 		local maxPlayers = if isSolo then 1 else 2
 
+		-- Generate a unique tableId. If multiple tables share the same model
+		-- Name (common when SoloTables get duplicated in Studio), using
+		-- `tableModel.Name` directly would cause every duplicate to overwrite
+		-- the previous entry in `tables[tableId]`. Symptom: only one solo
+		-- table is functional at a time — every prompt routes to the same
+		-- state, so once it's occupied the rest appear permanently full.
 		local tableId = tableModel.Name
+		if tables[tableId] then
+			local n = 2
+			while tables[`{tableModel.Name}_{n}`] do n += 1 end
+			tableId = `{tableModel.Name}_{n}`
+		end
 		local billboard, playerCountLabel = createBillboard(tablePart)
 
 		-- Update reward text for solo tables

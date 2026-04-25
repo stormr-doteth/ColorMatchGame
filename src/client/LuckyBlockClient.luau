@@ -112,8 +112,9 @@ end
 -- Sound effects
 ---------------------------------------------------------------------------
 
--- Create an anchored invisible Part that holds all sounds for one reveal.
--- Spatial audio: nearby players hear it too.
+-- Create an anchored invisible Part used for visual effects (particles/rings).
+-- Audio plays through SoundService (2D, local-only) so other nearby players
+-- don't hear another player's reveal sequence.
 local function createSoundAnchor(position: Vector3): Part
 	local anchor = Instance.new("Part")
 	anchor.Name = "LuckySoundAnchor"
@@ -133,12 +134,19 @@ local function makeSound(parent: Instance, id: string, volume: number?, looped: 
 	sound.Looped = looped or false
 	sound.RollOffMaxDistance = 80
 	sound.Parent = parent
+	-- When parented to SoundService, the anchor cleanup no longer destroys
+	-- one-shot sounds for us. Self-destroy on Ended to avoid leaking instances.
+	if not sound.Looped then
+		sound.Ended:Once(function()
+			sound:Destroy()
+		end)
+	end
 	return sound
 end
 
 -- Play tick with cutoff (the asset has dead audio at the end)
-local function playTick(anchor: Part, pitch: number)
-	local tick = makeSound(anchor, Constants.SFX_TICK, 0.6)
+local function playTick(pitch: number)
+	local tick = makeSound(SoundService, Constants.SFX_TICK, 0.6)
 	tick.PlaybackSpeed = pitch
 	tick:Play()
 	task.delay(Constants.SFX_TICK_DURATION / pitch, function()
@@ -419,7 +427,8 @@ local function playRevealAnimation(data)
 	local groundPos = getGroundPosition(dropPosition + Vector3.new(0, 3, 0))
 	local chairPos = groundPos + Vector3.new(0, CHAIR_HEIGHT, 0)
 
-	-- Sound anchor — all SFX attach here for spatial audio
+	-- Sound anchor kept for backward compatibility / potential visual hooks,
+	-- but all reveal SFX now play through SoundService (2D, local only).
 	local soundAnchor = createSoundAnchor(groundPos)
 
 	-- Get chair templates for cycling
@@ -501,7 +510,7 @@ local function playRevealAnimation(data)
 				end
 			end)
 			while not dropDone do task.wait() end
-			makeSound(soundAnchor, Constants.SFX_THUD, 0.8):Play()
+			makeSound(SoundService, Constants.SFX_THUD, 0.8):Play()
 		elseif dropClone:IsA("BasePart") then
 			local part = dropClone :: BasePart
 			local dropTween = TweenService:Create(part,
@@ -510,7 +519,7 @@ local function playRevealAnimation(data)
 			)
 			dropTween:Play()
 			dropTween.Completed:Wait()
-			makeSound(soundAnchor, Constants.SFX_THUD, 0.8):Play()
+			makeSound(SoundService, Constants.SFX_THUD, 0.8):Play()
 		end
 	end
 
@@ -518,7 +527,7 @@ local function playRevealAnimation(data)
 	-- Phase 2: Block Shrink (0.4s)
 	-----------------------------------------------------------------------
 	if dropClone then
-		makeSound(soundAnchor, Constants.SFX_WHOOSH, 0.7):Play()
+		makeSound(SoundService, Constants.SFX_WHOOSH, 0.7):Play()
 		local shrinkPos: Vector3
 		if dropClone:IsA("Model") then
 			shrinkPos = (dropClone :: Model):GetPivot().Position
@@ -632,7 +641,7 @@ local function playRevealAnimation(data)
 		showChair(lootChairIds[currentIndex])
 		-- Tick sound with rising pitch as it slows down
 		local tickPitch = lerp(0.8, 1.4, progress)
-		playTick(soundAnchor, tickPitch)
+		playTick(tickPitch)
 
 		task.wait(interval)
 		elapsed += interval
@@ -697,10 +706,10 @@ local function playRevealAnimation(data)
 	createLightRing(groundPos)
 
 	-- Fanfare on reveal
-	makeSound(soundAnchor, Constants.SFX_FANFARE, 1):Play()
+	makeSound(SoundService, Constants.SFX_FANFARE, 1):Play()
 
 	-- Shimmer loop during display
-	local shimmer = makeSound(soundAnchor, Constants.SFX_SHIMMER, 0.4, true)
+	local shimmer = makeSound(SoundService, Constants.SFX_SHIMMER, 0.4, true)
 	shimmer:Play()
 
 	-- Show notification only for the player who opened the block
@@ -713,8 +722,13 @@ local function playRevealAnimation(data)
 	-----------------------------------------------------------------------
 	task.wait(DISPLAY_TIME)
 
-	-- Fade out shimmer
-	TweenService:Create(shimmer, TweenInfo.new(0.5), { Volume = 0 }):Play()
+	-- Fade out shimmer (then destroy — it's parented to SoundService now)
+	local shimmerFade = TweenService:Create(shimmer, TweenInfo.new(0.5), { Volume = 0 })
+	shimmerFade:Play()
+	shimmerFade.Completed:Connect(function()
+		shimmer:Stop()
+		shimmer:Destroy()
+	end)
 
 	-- Stop spinning
 	if spinConnection then

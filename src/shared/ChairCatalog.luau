@@ -74,7 +74,10 @@ local ChairCatalog: { ChairEntry } = {
 
 	-- Gamepass exclusives (granted when the matching gamepass is purchased)
 	{ id = "office_chair", displayName = "Office Chair", price = 0, modelName = "OfficeChair", rarity = "gamepass", viewportZoom = 1.8, flipSeat = true, flipSeatDirection = true, viewportFlip = false, yOffset = 1.75 },
-	{ id = "vip_throne",   displayName = "VIP Throne",   price = 0, modelName = "VipThrone",   rarity = "gamepass", flipSeat = true, flipSeatDirection = true, viewportFlip = true },
+	-- VIP Throne: the model's default body+seat orientation matches the
+	-- original Seat exactly — body faces the table and the Seat's forward
+	-- axis faces the table — so no flips are needed.
+	{ id = "vip_throne",   displayName = "VIP Throne",   price = 0, modelName = "VipThrone",   rarity = "gamepass", viewportFlip = true },
 }
 
 local byId: { [string]: ChairEntry } = {}

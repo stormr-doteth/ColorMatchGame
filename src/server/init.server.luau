@@ -326,6 +326,18 @@ RemoteSetup.Get("DevGrantLuckyBlock").OnServerEvent:Connect(function(player, blo
 	LuckyBlockShop.GrantTool(player, blockId)
 end)
 
+-- Dev-only: clear the GroupRewardClaimed flag so the dev can re-test the
+-- claim flow as if they were a brand-new player. PlayerDataUpdate is pushed
+-- so both the GroupRewardPrompt popup and the Rewards panel revert to their
+-- unclaimed states without a server rejoin.
+RemoteSetup.Get("DevResetGroupClaim").OnServerEvent:Connect(function(player)
+	if not isDevAuthorized(player) then return end
+	local data = ProfileService.GetData(player)
+	if not data then return end
+	data.GroupRewardClaimed = false
+	ProfileService.PushData(player)
+end)
+
 RemoteSetup.Get("UseHint").OnServerEvent:Connect(function(player)
 	if not RateLimit.check("UseHint", player, 0.3) then return end
 	ProfileService.UseHint(player)
@@ -354,7 +366,7 @@ RemoteSetup.Get("ClaimGroupReward").OnServerEvent:Connect(function(player)
 	ProfileService.AddLuckyBlock(player, "uncommon_block")
 	LuckyBlockShop.GrantTool(player, "uncommon_block")
 	ProfileService.AddHints(player, 2)
-	Analytics.LogEconomy(player, "Source", "Cash", 250, "Reward", "group_reward", "lobby")
+	Analytics.LogEconomy(player, "Source", "Cash", 250, "TimedReward", "group_reward", "lobby")
 	Analytics.LogCustom(player, "RewardClaimed", 1, { CustomField04 = "group" }, "lobby")
 	RemoteSetup.Get("ShowNotification"):FireClient(player, "Group reward claimed! +$250 + Uncommon Block + 2 Hints!")
 end)
@@ -373,7 +385,7 @@ RemoteSetup.Get("ClaimVIPReward").OnServerEvent:Connect(function(player)
 	ProfileService.AddLuckyBlock(player, "rare_block")
 	LuckyBlockShop.GrantTool(player, "rare_block")
 	ProfileService.AddHints(player, 1)
-	Analytics.LogEconomy(player, "Source", "Cash", 500, "Reward", "vip_reward", "lobby")
+	Analytics.LogEconomy(player, "Source", "Cash", 500, "TimedReward", "vip_reward", "lobby")
 	Analytics.LogCustom(player, "RewardClaimed", 1, { CustomField04 = "vip" }, "lobby")
 	RemoteSetup.Get("ShowNotification"):FireClient(player, "VIP reward claimed! +$500 + Rare Block + Hint!")
 end)

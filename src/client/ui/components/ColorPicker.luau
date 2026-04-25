@@ -48,10 +48,21 @@ local function VerticalStrip(props: {
 	end
 
 	React.useEffect(function()
+		-- Mouse drags are messy on the desktop side: InputBegan fires with a
+		-- MouseButton1 InputObject, but the *movement* arrives via InputChanged
+		-- as a separate MouseMovement InputObject — so identity-matching breaks
+		-- mouse drag entirely. Match mouse drags by type, and only require
+		-- per-finger identity matching for Touch inputs (which use one stable
+		-- InputObject per finger from begin → end).
 		local moveCon = UserInputService.InputChanged:Connect(function(input)
-			if activeInput.current ~= input then
-				return
-			end
+			local active = activeInput.current
+			if not active then return end
+			local sameTouch = input.UserInputType == Enum.UserInputType.Touch
+				and active.UserInputType == Enum.UserInputType.Touch
+				and active == input
+			local mouseDrag = input.UserInputType == Enum.UserInputType.MouseMovement
+				and active.UserInputType == Enum.UserInputType.MouseButton1
+			if not (sameTouch or mouseDrag) then return end
 			local val = computeValue(input.Position.Y)
 			if val then
 				props.onChange(val)
@@ -59,7 +70,13 @@ local function VerticalStrip(props: {
 		end)
 
 		local endCon = UserInputService.InputEnded:Connect(function(input)
-			if activeInput.current == input then
+			local active = activeInput.current
+			if not active then return end
+			-- End the drag when the matching button/finger releases.
+			if active == input
+				or (active.UserInputType == Enum.UserInputType.MouseButton1
+					and input.UserInputType == Enum.UserInputType.MouseButton1)
+			then
 				activeInput.current = nil
 			end
 		end)
@@ -202,8 +219,13 @@ local function ColorPicker(props: ColorPickerProps)
 		ColorSequenceKeypoint.new(1, Color3.fromHSV(hue, sat, 0)),
 	})
 
+	-- Container width must accommodate 3 strips × 60px + 2 gaps × 18px = 216px,
+	-- plus a couple of pixels of breathing room so nothing clips against the
+	-- parent panel's right edge. The previous 200px width let the third strip
+	-- overflow, which on mobile pushed it past the visible match panel and
+	-- made the brightness slider unreachable.
 	return e("Frame", {
-		Size = UDim2.new(0, 200, 1, 0),
+		Size = UDim2.new(0, 220, 1, 0),
 		BackgroundTransparency = 1,
 	}, {
 		Layout = e("UIListLayout", {

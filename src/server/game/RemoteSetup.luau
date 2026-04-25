@@ -46,6 +46,7 @@ local REMOTE_NAMES = {
 	"OpenFeedback",
 	"CloseFeedback",
 	"DevGrantLuckyBlock",
+	"DevResetGroupClaim",
 }
 
 local RemoteSetup = {}

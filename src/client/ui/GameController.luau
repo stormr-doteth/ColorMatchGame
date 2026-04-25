@@ -604,6 +604,12 @@ local function GameController()
 
 		table.insert(connections, remotes:WaitForChild("MatchStart").OnClientEvent:Connect(function(data)
 			setOpponentName(data.opponentName or "")
+			-- Set the avatar IDs immediately on MatchStart. Previously these
+			-- were only populated by RoundResult, so the first round of a new
+			-- 1v1 displayed the avatar from the *previous* match (the name
+			-- updated correctly because it's set here, but the headshot lagged).
+			setMyUserId(data.myUserId or 0)
+			setOpponentUserId(data.opponentUserId or 0)
 			setRoundsToWin(data.roundsToWin)
 			setIsSolo(data.solo or false)
 			setSoloTotalRounds(data.totalRounds or data.roundsToWin)
@@ -1528,7 +1534,7 @@ local function GameController()
 
 			-- Color picker strips (slide in from left, then slide out left on solo submit)
 			PickerWrapper = (phase ~= "showing") and e("Frame", {
-				Size = UDim2.new(0, 200, 1, 0),
+				Size = UDim2.new(0, 220, 1, 0),
 				Position = UDim2.new(0, pickerOffset, 0, 0),
 				BackgroundTransparency = 1,
 				ZIndex = 5,

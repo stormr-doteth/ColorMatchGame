@@ -333,10 +333,14 @@ function MatchController:Start()
 
 	getRemote("MatchStart"):FireClient(self.player1, {
 		opponentName = self.player2.DisplayName,
+		opponentUserId = self.player2.UserId,
+		myUserId = self.player1.UserId,
 		roundsToWin = Constants.ROUNDS_TO_WIN,
 	})
 	getRemote("MatchStart"):FireClient(self.player2, {
 		opponentName = self.player1.DisplayName,
+		opponentUserId = self.player1.UserId,
+		myUserId = self.player2.UserId,
 		roundsToWin = Constants.ROUNDS_TO_WIN,
 	})
 
